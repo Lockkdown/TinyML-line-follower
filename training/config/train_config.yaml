@@ -1,0 +1,8 @@
+model_name: mobilenet_v1_025   # lenet5 | mobilenet_v1_025 | mobilenet_v1_05 | mobilenet_v2_035 | resnet8
+img_size: 96
+num_classes: 4
+batch_size: 32
+epochs: 50
+learning_rate: 0.001
+validation_split: 0.15
+test_split: 0.15

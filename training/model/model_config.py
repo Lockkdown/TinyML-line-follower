@@ -23,6 +23,7 @@ class ModelConfig:
     dropout: float
     l2_reg: float
     use_pretrained: bool
+    learning_rate: float
 
     def __post_init__(self) -> None:
         """Validate model configuration fields on instantiation."""

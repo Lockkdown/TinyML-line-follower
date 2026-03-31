@@ -1,6 +1,7 @@
 #pragma once
 
-const char WIFI_CONTROLLER_HTML[] = R"rawliteral(
+// Gửi dữ liệu về web UI
+const char WIFI_CONTROLLER_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,30 +15,50 @@ const char WIFI_CONTROLLER_HTML[] = R"rawliteral(
   #status{padding:6px 18px;border-radius:20px;font-size:.85rem;font-weight:bold;background:#333;color:#888;transition:all .3s}
   #status.ok{background:#1a3a1a;color:#4caf50}
   #status.err{background:#3a1a1a;color:#f44336}
-  .grid{display:grid;grid-template-columns:repeat(3,90px);grid-template-rows:repeat(3,90px);gap:10px}
-  button{width:90px;height:90px;border:none;border-radius:14px;font-size:1.05rem;font-weight:bold;cursor:pointer;background:#222;color:#ddd;border:2px solid #333;transition:background .1s,transform .1s;user-select:none;-webkit-user-select:none}
-  button:active,button.pressed{background:#2a5a8a;border-color:#4a9aff;transform:scale(.93)}
-  #btn-forward{grid-column:2;grid-row:1}
-  #btn-left   {grid-column:1;grid-row:2}
-  #btn-stop   {grid-column:2;grid-row:2;background:#2a1a1a;border-color:#833}
-  #btn-stop:active,#btn-stop.pressed{background:#8a2a2a;border-color:#ff4a4a}
-  #btn-right  {grid-column:3;grid-row:2}
-  .hint{font-size:.75rem;color:#555;text-align:center}
+  .cam-wrap{width:100%;max-width:320px;aspect-ratio:4/3;background:#222;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+  #cam{width:100%;height:100%;object-fit:cover;display:block;}
+  #cam-err{display:none;color:#666;font-size:.85rem;}
+  .grid{display:grid;grid-template-columns:repeat(3,90px);gap:15px;}
+  .btn{border:none;border-radius:12px;color:#fff;font-size:1.5rem;font-weight:bold;cursor:pointer;padding:15px;user-select:none;touch-action:manipulation;transition:transform .1s, filter .1s;}
+  .btn:active, .btn.pressed{transform:scale(0.92);filter:brightness(0.8);}
+  
+  .btn-forward { grid-column: 2; background: #2196F3; }
+  .btn-left { grid-column: 1; background: #4CAF50; }
+  .btn-stop { grid-column: 2; background: #F44336; }
+  .btn-right { grid-column: 3; background: #4CAF50; }
+  .btn-backward { grid-column: 2; background: #FF9800; }
+  
+  small{font-size:0.8rem;font-weight:normal;opacity:0.8;}
+  .hint{color:#777;font-size:.85rem;}
 </style>
 </head>
 <body>
 <h1>ROBOT CONTROLLER</h1>
 <div id="status">Connecting...</div>
+<div class="cam-wrap">
+  <img id="cam" alt="">
+  <span id="cam-err">Camera unavailable</span>
+</div>
 <div class="grid">
-  <button id="btn-forward" data-action="forward">&#9650;<br><small>W</small></button>
-  <button id="btn-left"    data-action="left">&#9664;<br><small>A</small></button>
-  <button id="btn-stop"    data-action="stop">&#9632;<br><small>S</small></button>
-  <button id="btn-right"   data-action="right">&#9654;<br><small>D</small></button>
+  <!-- Hàng 1 -->
+  <div style="grid-column: 1"></div>
+  <button class="btn btn-forward" id="btn-forward" data-action="forward">&#9650;<br><small>W</small></button>
+  <div style="grid-column: 3"></div>
+  
+  <!-- Hàng 2 -->
+  <button class="btn btn-left" id="btn-left" data-action="left">&#9664;<br><small>A</small></button>
+  <button class="btn btn-stop" id="btn-stop" data-action="stop">&#9632;<br><small>SPACE</small></button>
+  <button class="btn btn-right" id="btn-right" data-action="right">&#9654;<br><small>D</small></button>
+  
+  <!-- Hàng 3 -->
+  <div style="grid-column: 1"></div>
+  <button class="btn btn-backward" id="btn-backward" data-action="backward">&#9660;<br><small>S</small></button>
+  <div style="grid-column: 3"></div>
 </div>
 <p class="hint">Hold button or key to move &bull; Release to stop</p>
 <script>
-const KEY_MAP = {w:'forward', a:'left', d:'right', s:'stop'};
-const STOP_ON_RELEASE = new Set(['w','a','d']);
+const KEY_MAP = {w:'forward', a:'left', d:'right', s:'backward', ' ':'stop'};
+const STOP_ON_RELEASE = new Set(['w','a','d','s']);
 const statusEl = document.getElementById('status');
 
 function setStatus(ok, text) {
@@ -80,6 +101,40 @@ document.addEventListener('keyup', e => {
 
 // Initial connectivity check
 sendCommand('stop');
+
+// Camera polling
+const camEl  = document.getElementById('cam');
+const camErr = document.getElementById('cam-err');
+let isPolling = false;
+
+function pollCamera() {
+  if (isPolling) return;
+  isPolling = true;
+
+  const img = new Image();
+  
+  img.onload = () => {
+    camEl.src = img.src;
+    camEl.style.display = 'block';
+    camErr.style.display = 'none';
+    isPolling = false;
+    // Bỏ thời gian chờ (delay) hoặc giảm xuống mức tối thiểu (0-10ms)
+    setTimeout(pollCamera, 10); 
+  };
+  
+  img.onerror = () => {
+    camEl.style.display = 'none';
+    camErr.style.display = 'block';
+    isPolling = false;
+    setTimeout(pollCamera, 1000); // Retry later if error occurs
+  };
+  
+  // Set src to trigger request
+  img.src = '/snapshot?t=' + Date.now();
+}
+
+// Start the loop
+pollCamera();
 </script>
 </body>
 </html>

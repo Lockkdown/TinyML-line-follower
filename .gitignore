@@ -1,3 +1,10 @@
-idea
-plan
-.windsurf
+outputs/checkpoints/
+outputs/experiments/
+dataset/raw/
+dataset/processed/
+__pycache__/
+*.pyc
+.env
+docs
+.windsurf/
+firmware/src/wifi_config.h

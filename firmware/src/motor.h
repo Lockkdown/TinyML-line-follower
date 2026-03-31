@@ -9,8 +9,10 @@ constexpr int MOTOR_RIGHT_IN4 = 41;
 constexpr int MOTOR_RIGHT_ENB = 21;
 
 // PWM config — 1000Hz, 8-bit resolution (0–255)
-constexpr int PWM_FREQ       = 1000;
-constexpr int PWM_RESOLUTION = 8;
+constexpr int PWM_FREQ          = 1000;
+constexpr int PWM_RESOLUTION    = 8;
+constexpr int PWM_CHANNEL_LEFT  = 0;
+constexpr int PWM_CHANNEL_RIGHT = 1;
 
 void initMotor();
 void setMotor(int left_speed, int right_speed);

@@ -45,9 +45,8 @@ void initMotor() {
     pinMode(MOTOR_RIGHT_IN3, OUTPUT);
     pinMode(MOTOR_RIGHT_IN4, OUTPUT);
 
-    // Arduino core 2.x API — channel-based
     ledcSetup(PWM_CHANNEL_LEFT,  PWM_FREQ, PWM_RESOLUTION);
-    ledcAttachPin(MOTOR_LEFT_ENA, PWM_CHANNEL_LEFT);
+    ledcAttachPin(MOTOR_LEFT_ENA,  PWM_CHANNEL_LEFT);
     ledcSetup(PWM_CHANNEL_RIGHT, PWM_FREQ, PWM_RESOLUTION);
     ledcAttachPin(MOTOR_RIGHT_ENB, PWM_CHANNEL_RIGHT);
 

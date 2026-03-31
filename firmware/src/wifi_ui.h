@@ -1,7 +1,6 @@
 #pragma once
-#include <pgmspace.h>
 
-const char WIFI_CONTROLLER_HTML[] PROGMEM = R"rawliteral(
+const char WIFI_CONTROLLER_HTML[] = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
 <head>

@@ -9,7 +9,7 @@ static AsyncWebServer server(80);
 
 static void registerRoutes() {
     server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send_P(200, "text/html", WIFI_CONTROLLER_HTML);
+        request->send(200, "text/html", WIFI_CONTROLLER_HTML);
     });
 
     server.on("/forward", HTTP_POST, [](AsyncWebServerRequest* request) {

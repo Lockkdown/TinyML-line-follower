@@ -11,15 +11,15 @@ static void setLeftMotor(int speed) {
     if (speed > 0) {
         digitalWrite(MOTOR_LEFT_IN1, HIGH);
         digitalWrite(MOTOR_LEFT_IN2, LOW);
-        ledcWrite(PWM_CHANNEL_LEFT, speed);
+        ledcWrite(MOTOR_LEFT_ENA, speed);
     } else if (speed < 0) {
         digitalWrite(MOTOR_LEFT_IN1, LOW);
         digitalWrite(MOTOR_LEFT_IN2, HIGH);
-        ledcWrite(PWM_CHANNEL_LEFT, -speed);
+        ledcWrite(MOTOR_LEFT_ENA, -speed);
     } else {
         digitalWrite(MOTOR_LEFT_IN1, LOW);
         digitalWrite(MOTOR_LEFT_IN2, LOW);
-        ledcWrite(PWM_CHANNEL_LEFT, 0);
+        ledcWrite(MOTOR_LEFT_ENA, 0);
     }
 }
 
@@ -27,15 +27,15 @@ static void setRightMotor(int speed) {
     if (speed > 0) {
         digitalWrite(MOTOR_RIGHT_IN3, HIGH);
         digitalWrite(MOTOR_RIGHT_IN4, LOW);
-        ledcWrite(PWM_CHANNEL_RIGHT, speed);
+        ledcWrite(MOTOR_RIGHT_ENB, speed);
     } else if (speed < 0) {
         digitalWrite(MOTOR_RIGHT_IN3, LOW);
         digitalWrite(MOTOR_RIGHT_IN4, HIGH);
-        ledcWrite(PWM_CHANNEL_RIGHT, -speed);
+        ledcWrite(MOTOR_RIGHT_ENB, -speed);
     } else {
         digitalWrite(MOTOR_RIGHT_IN3, LOW);
         digitalWrite(MOTOR_RIGHT_IN4, LOW);
-        ledcWrite(PWM_CHANNEL_RIGHT, 0);
+        ledcWrite(MOTOR_RIGHT_ENB, 0);
     }
 }
 
@@ -45,11 +45,9 @@ void initMotor() {
     pinMode(MOTOR_RIGHT_IN3, OUTPUT);
     pinMode(MOTOR_RIGHT_IN4, OUTPUT);
 
-    // Arduino core 2.x API — channel-based
-    ledcSetup(PWM_CHANNEL_LEFT,  PWM_FREQ, PWM_RESOLUTION);
-    ledcAttachPin(MOTOR_LEFT_ENA, PWM_CHANNEL_LEFT);
-    ledcSetup(PWM_CHANNEL_RIGHT, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttachPin(MOTOR_RIGHT_ENB, PWM_CHANNEL_RIGHT);
+    // Arduino core 3.x API — pin-based (no manual channel assignment)
+    ledcAttach(MOTOR_LEFT_ENA,  PWM_FREQ, PWM_RESOLUTION);
+    ledcAttach(MOTOR_RIGHT_ENB, PWM_FREQ, PWM_RESOLUTION);
 
     setMotor(0, 0);
 }

@@ -22,5 +22,7 @@ constexpr int HREF_GPIO_NUM  = 7;
 constexpr int PCLK_GPIO_NUM  = 13;
 
 constexpr int XCLK_FREQ_HZ = 20000000;
+constexpr int STREAM_QUALITY_DEFAULT = 12;
 
 bool initCamera();
+void setStreamQuality(int quality);

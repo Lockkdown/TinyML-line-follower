@@ -1,3 +1,7 @@
+// file: firmware/src/wifi_ui.h
+// purpose: HTML/CSS/JS for the wifi controller web interface
+// dependencies: none
+
 #pragma once
 
 // Gửi dữ liệu về web UI
@@ -28,6 +32,14 @@ const char WIFI_CONTROLLER_HTML[] PROGMEM = R"rawliteral(
   .btn-right { grid-column: 3; background: #4CAF50; }
   .btn-backward { grid-column: 2; background: #FF9800; }
   
+  .speed-ctrl { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; max-width: 300px; }
+  .speed-lbl { font-size: 1rem; color: #ccc; }
+  .speed-slider { width: 100%; }
+  .speed-presets { display: flex; gap: 10px; }
+  .preset-btn { padding: 8px 15px; border: none; border-radius: 8px; background: #444; color: #fff; cursor: pointer; transition: 0.2s; }
+  .preset-btn:hover { background: #555; }
+  .preset-btn:active { transform: scale(0.95); }
+
   small{font-size:0.8rem;font-weight:normal;opacity:0.8;}
   .hint{color:#777;font-size:.85rem;}
 </style>
@@ -39,6 +51,16 @@ const char WIFI_CONTROLLER_HTML[] PROGMEM = R"rawliteral(
   <img id="cam" alt="">
   <span id="cam-err">Camera unavailable</span>
 </div>
+
+<div class="speed-ctrl">
+  <div class="speed-lbl">Speed: <span id="speed-val">100</span></div>
+  <input type="range" id="speed-slider" class="speed-slider" min="40" max="255" value="100">
+  <div class="speed-presets">
+    <button class="preset-btn" onclick="setSpeed(70)">🐢 Dataset (70)</button>
+    <button class="preset-btn" onclick="setSpeed(180)">🚀 Test (180)</button>
+  </div>
+</div>
+
 <div class="grid">
   <!-- Hàng 1 -->
   <div style="grid-column: 1"></div>
@@ -74,6 +96,27 @@ async function sendCommand(action) {
     setStatus(false, 'Disconnected');
   }
 }
+
+const speedSlider = document.getElementById('speed-slider');
+const speedVal = document.getElementById('speed-val');
+
+function setSpeed(val) {
+  speedSlider.value = val;
+  speedVal.textContent = val;
+  fetch('/speed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'value=' + val
+  });
+}
+
+speedSlider.addEventListener('input', (e) => {
+  speedVal.textContent = e.target.value;
+});
+
+speedSlider.addEventListener('change', (e) => {
+  setSpeed(e.target.value);
+});
 
 document.querySelectorAll('button[data-action]').forEach(btn => {
   const action = btn.dataset.action;
@@ -118,7 +161,6 @@ function pollCamera() {
     camEl.style.display = 'block';
     camErr.style.display = 'none';
     isPolling = false;
-    // Bỏ thời gian chờ (delay) hoặc giảm xuống mức tối thiểu (0-10ms)
     setTimeout(pollCamera, 10); 
   };
   
@@ -129,11 +171,9 @@ function pollCamera() {
     setTimeout(pollCamera, 1000); // Retry later if error occurs
   };
   
-  // Set src to trigger request
   img.src = '/snapshot?t=' + Date.now();
 }
 
-// Start the loop
 pollCamera();
 </script>
 </body>

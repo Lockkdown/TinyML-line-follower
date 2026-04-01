@@ -1,0 +1,241 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import '../services/robot_service.dart';
+import '../widgets/camera_view.dart';
+import '../widgets/control_button.dart';
+import 'dataset_collection_screen.dart';
+import 'settings_screen.dart';
+
+class ControllerScreen extends StatefulWidget {
+  const ControllerScreen({super.key});
+
+  @override
+  State<ControllerScreen> createState() => _ControllerScreenState();
+}
+
+class _ControllerScreenState extends State<ControllerScreen> {
+  final RobotService _robotService = RobotService();
+  bool _connected = false;
+  Timer? _connectionTimer;
+  double _speed = 100;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  @override
+  void dispose() {
+    _connectionTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initialize() async {
+    await _robotService.loadBaseUrl();
+    await _checkConnection();
+    _startConnectionPolling();
+  }
+
+  void _startConnectionPolling() {
+    _connectionTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) _checkConnection();
+    });
+  }
+
+  Future<void> _checkConnection() async {
+    final connected = await _robotService.checkConnection();
+    if (mounted && connected != _connected) {
+      setState(() {
+        _connected = connected;
+      });
+    }
+  }
+
+  void _sendCommand(String cmd) {
+    _robotService.sendCommand(cmd);
+  }
+
+  Widget _buildSpeedControl() {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'Speed: ',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            Text(
+              _speed.toInt().toString(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(
+          height: 36, // Ép chiều cao slider mỏng lại để tiết kiệm diện tích dọc
+          child: Slider(
+            value: _speed,
+            min: 40,
+            max: 255,
+            divisions: 43,
+            activeColor: Colors.blueAccent,
+            inactiveColor: Colors.grey[800],
+            onChanged: (value) {
+              setState(() {
+                _speed = value;
+              });
+            },
+            onChangeEnd: (value) {
+              _robotService.setSpeed(value.toInt());
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openDatasetCollection() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) =>
+            DatasetCollectionScreen(robotService: _robotService),
+      ),
+    );
+  }
+
+  void _openSettings() async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (context) => SettingsScreen(
+          initialUrl: _robotService.baseUrl,
+          onUrlChanged: (url) async {
+            await _robotService.saveBaseUrl(url);
+            await _checkConnection();
+          },
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      await _checkConnection();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E1E1E),
+        foregroundColor: Colors.white,
+        title: const Text('ROBOT CONTROLLER'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _connected ? Colors.green : Colors.red,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _connected ? 'Connected' : 'Disconnected',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _openDatasetCollection,
+                  icon: const Icon(Icons.dataset),
+                  tooltip: 'Dataset Collection',
+                ),
+                IconButton(
+                  onPressed: _openSettings,
+                  icon: const Icon(Icons.settings),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            Expanded(
+              flex: 4, // Thu nhỏ camera thêm 1 chút
+              child: CameraView(robotService: _robotService),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              flex: 5, // Tăng không gian cho control để không bị cuộn/tràn
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildSpeedControl(),
+                    const SizedBox(height: 12),
+                    // Forward button
+                    ControlButton(
+                      backgroundColor: Colors.blue,
+                      onPressed: () => _sendCommand('forward'),
+                      onReleased: () => _sendCommand('stop'),
+                      onCanceled: () => _sendCommand('stop'),
+                      child: const Icon(Icons.arrow_upward, color: Colors.white, size: 32),
+                    ),
+                    const SizedBox(height: 12), // Khoảng cách đều 12px
+                    // Left, Stop, Right buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ControlButton(
+                          backgroundColor: Colors.green,
+                          onPressed: () => _sendCommand('left'),
+                          onReleased: () => _sendCommand('stop'),
+                          onCanceled: () => _sendCommand('stop'),
+                          child: const Icon(Icons.arrow_back, color: Colors.white, size: 32),
+                        ),
+                        ControlButton(
+                          backgroundColor: Colors.red,
+                          onPressed: () => _sendCommand('stop'),
+                          child: const Icon(Icons.stop, color: Colors.white, size: 32),
+                        ),
+                        ControlButton(
+                          backgroundColor: Colors.green,
+                          onPressed: () => _sendCommand('right'),
+                          onReleased: () => _sendCommand('stop'),
+                          onCanceled: () => _sendCommand('stop'),
+                          child: const Icon(Icons.arrow_forward, color: Colors.white, size: 32),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12), // Khoảng cách đều 12px
+                    // Backward button (bottom)
+                    ControlButton(
+                      backgroundColor: Colors.orange,
+                      onPressed: () => _sendCommand('backward'),
+                      onReleased: () => _sendCommand('stop'),
+                      onCanceled: () => _sendCommand('stop'),
+                      child: const Icon(Icons.arrow_downward, color: Colors.white, size: 32),
+                    ),
+                    const SizedBox(height: 8), // Padding mỏng dưới cùng
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

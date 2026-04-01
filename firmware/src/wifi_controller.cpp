@@ -6,6 +6,7 @@
 #include "camera.h"
 #include "wifi_controller.h"
 #include "wifi_ui.h"
+#include "wifi_config.h"
 
 static AsyncWebServer server(80);
 
@@ -77,8 +78,8 @@ static void registerRoutes() {
     });
 
     server.on("/forward", HTTP_POST, [](AsyncWebServerRequest* request) {
-        // Compensate for weak left motor: full power to left, reduced power to right
-        setMotor(SPEED_FULL, SPEED_RIGHT_COMPENSATED);
+        // Both motors at full speed
+        setMotor(SPEED_FULL, SPEED_FULL);
         request->send(200);
     });
 
@@ -93,8 +94,8 @@ static void registerRoutes() {
     });
 
     server.on("/backward", HTTP_POST, [](AsyncWebServerRequest* request) {
-        // Same compensation for reverse
-        setMotor(-SPEED_FULL, -SPEED_RIGHT_COMPENSATED);
+        // Both motors at full speed (reverse)
+        setMotor(-SPEED_FULL, -SPEED_FULL);
         request->send(200);
     });
 
@@ -168,6 +169,15 @@ static void registerRoutes() {
 }
 
 void connectWiFi(const char* ssid, const char* password) {
+    IPAddress local_ip, gateway_ip, subnet_mask;
+    local_ip.fromString(STATIC_IP);
+    gateway_ip.fromString(GATEWAY);
+    subnet_mask.fromString(SUBNET);
+    
+    if (!WiFi.config(local_ip, gateway_ip, subnet_mask)) {
+        Serial.println("[WiFi] Static IP config failed, using DHCP");
+    }
+    
     WiFi.begin(ssid, password);
     Serial.print("[WiFi] Connecting");
     while (WiFi.status() != WL_CONNECTED) {
@@ -175,7 +185,7 @@ void connectWiFi(const char* ssid, const char* password) {
         Serial.print(".");
     }
     Serial.println();
-    Serial.print("[WiFi] Connected — IP: ");
+    Serial.print("[WiFi] Static IP: ");
     Serial.println(WiFi.localIP());
 }
 

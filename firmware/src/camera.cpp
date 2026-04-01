@@ -35,7 +35,7 @@ static camera_config_t buildCameraConfig() {
 
     config.pixel_format = PIXFORMAT_JPEG;
     config.frame_size   = FRAMESIZE_QVGA; // 320x240
-    config.jpeg_quality = 10; // Giảm xuống 10 (chất lượng cao hơn, size to hơn một chút nhưng nét hơn)
+    config.jpeg_quality = STREAM_QUALITY_DEFAULT;
     config.fb_count     = 2;
     config.fb_location  = CAMERA_FB_IN_PSRAM;
     config.grab_mode    = CAMERA_GRAB_LATEST; // Đổi lại thành LATEST để giảm độ trễ, luôn lấy frame mới nhất
@@ -60,6 +60,14 @@ bool initCamera() {
         esp_camera_fb_return(frame_buffer);
     }
 
+    setStreamQuality(STREAM_QUALITY_DEFAULT);
     Serial.println("[Camera] Init SUCCESS — QVGA JPEG");
     return true;
+}
+
+void setStreamQuality(int quality) {
+    sensor_t* sensor = esp_camera_sensor_get();
+    if (sensor) {
+        sensor->set_quality(sensor, quality);
+    }
 }

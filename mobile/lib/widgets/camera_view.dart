@@ -16,6 +16,8 @@ class _CameraViewState extends State<CameraView> {
   bool _showError = false;
   int _consecutiveFailures = 0;
   bool _disposed = false;
+  int _currentDelay = 33; // Start with ~30 FPS
+  int _backoffMultiplier = 1;
 
   @override
   void initState() {
@@ -31,29 +33,48 @@ class _CameraViewState extends State<CameraView> {
 
   Future<void> _fetchLoop() async {
     while (!_disposed) {
+      final startTime = DateTime.now();
       final bytes = await widget.robotService.fetchSnapshotBytes();
 
       if (_disposed) break;
 
       if (bytes != null) {
         _consecutiveFailures = 0;
+        _backoffMultiplier = 1;
+        
+        // Adaptive delay: reduce to 33ms for 30 FPS when network is good
+        if (_currentDelay > 33) {
+          _currentDelay = (_currentDelay - 10).clamp(33, 100);
+        }
+        
         if (mounted) {
           setState(() {
             _frameBytes = bytes;
             _showError = false;
           });
         }
-        // Rely purely on network round-trip time for pacing instead of artificial delay
+        
+        // Calculate actual time spent and adjust delay
+        final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+        final adjustedDelay = (_currentDelay - elapsed).clamp(10, _currentDelay);
+        await Future.delayed(Duration(milliseconds: adjustedDelay));
       } else {
         _consecutiveFailures++;
-        if (mounted && _consecutiveFailures >= 3) {
+        
+        // Exponential backoff on failures
+        if (_consecutiveFailures >= 2) {
+          _backoffMultiplier = (_backoffMultiplier * 2).clamp(1, 8);
+          _currentDelay = (33 * _backoffMultiplier).clamp(33, 250);
+        }
+        
+        if (mounted && _consecutiveFailures >= 5) {
           setState(() {
-            _frameBytes = null; // Only clear frame when truly disconnected
+            _frameBytes = null;
             _showError = true;
           });
         }
-        // Back off slightly on error
-        await Future.delayed(const Duration(milliseconds: 100));
+        
+        await Future.delayed(Duration(milliseconds: _currentDelay));
       }
     }
   }

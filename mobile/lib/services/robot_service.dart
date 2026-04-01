@@ -43,8 +43,17 @@ class RobotService {
     try {
       final response = await _client.get(
         Uri.parse(getSnapshotUrl()),
-      ).timeout(const Duration(milliseconds: 1500));
+      ).timeout(const Duration(milliseconds: 300)); // Reduce to 300ms for faster frame dropping
       if (response.statusCode == 200) return response.bodyBytes;
+      return null;
+    } on SocketException {
+      // Network error - return null immediately
+      return null;
+    } on HttpException {
+      // HTTP error - return null immediately
+      return null;
+    } on TimeoutException {
+      // Timeout - return null immediately
       return null;
     } catch (_) {
       return null;
@@ -58,6 +67,18 @@ class RobotService {
       ).timeout(const Duration(milliseconds: 500));
     } catch (_) {
       // Silently ignore network errors for fire-and-forget behavior
+    }
+  }
+
+  Future<void> setSpeed(int value) async {
+    try {
+      await _client.post(
+        Uri.parse('$_baseUrl/speed'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'value=$value',
+      ).timeout(const Duration(milliseconds: 500));
+    } catch (_) {
+      // Silently ignore
     }
   }
 

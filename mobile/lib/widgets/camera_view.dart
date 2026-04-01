@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../services/robot_service.dart';
 
@@ -12,85 +12,60 @@ class CameraView extends StatefulWidget {
 }
 
 class _CameraViewState extends State<CameraView> {
-  String? _imageUrl;
+  Uint8List? _frameBytes;
   bool _showError = false;
   int _consecutiveFailures = 0;
-  Timer? _pollTimer;
+  bool _disposed = false;
 
   @override
   void initState() {
     super.initState();
-    _startPolling();
+    _fetchLoop();
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _disposed = true;
     super.dispose();
   }
 
-  void _startPolling() {
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 150), (_) {
-      if (mounted) _fetchSnapshot();
-    });
-    _fetchSnapshot();
-  }
+  Future<void> _fetchLoop() async {
+    while (!_disposed) {
+      final bytes = await widget.robotService.fetchSnapshotBytes();
 
-  Future<void> _fetchSnapshot() async {
-    final url = widget.robotService.getSnapshotUrl();
-    if (!mounted) return;
+      if (_disposed) break;
 
-    setState(() {
-      _imageUrl = url;
-    });
-  }
-
-  void _onImageError() {
-    _consecutiveFailures++;
-    if (_consecutiveFailures >= 3 && mounted) {
-      setState(() {
-        _showError = true;
-      });
-    }
-  }
-
-  void _onImageLoaded() {
-    _consecutiveFailures = 0;
-    if (_showError && mounted) {
-      setState(() {
-        _showError = false;
-      });
+      if (bytes != null) {
+        _consecutiveFailures = 0;
+        if (mounted) {
+          setState(() {
+            _frameBytes = bytes;
+            _showError = false;
+          });
+        }
+        // Rely purely on network round-trip time for pacing instead of artificial delay
+      } else {
+        _consecutiveFailures++;
+        if (mounted && _consecutiveFailures >= 3) {
+          setState(() {
+            _frameBytes = null; // Only clear frame when truly disconnected
+            _showError = true;
+          });
+        }
+        // Back off slightly on error
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final aspectRatio = 16 / 9;
-
     if (_showError) {
-      return Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E1E),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.camera_alt_outlined, size: 48, color: Colors.grey),
-              const SizedBox(height: 8),
-              const Text(
-                'Camera unavailable',
-                style: TextStyle(color: Colors.grey, fontSize: 16),
-              ),
-            ],
-          ),
-        ),
-      );
+      return _buildErrorState();
     }
 
     return AspectRatio(
-      aspectRatio: aspectRatio,
+      aspectRatio: 16 / 9,
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF1E1E1E),
@@ -98,23 +73,38 @@ class _CameraViewState extends State<CameraView> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: _imageUrl != null
-              ? Image.network(
-                  _imageUrl!,
+          child: _frameBytes != null
+              ? Image.memory(
+                  _frameBytes!,
                   fit: BoxFit.cover,
+                  gaplessPlayback: true,
                   errorBuilder: (context, error, stackTrace) {
-                    _onImageError();
-                    return const SizedBox.shrink();
-                  },
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) {
-                      _onImageLoaded();
-                      return child;
-                    }
                     return const SizedBox.shrink();
                   },
                 )
               : const SizedBox.shrink(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.camera_alt_outlined, size: 48, color: Colors.grey),
+            SizedBox(height: 8),
+            Text(
+              'Camera unavailable',
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+          ],
         ),
       ),
     );

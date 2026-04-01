@@ -169,15 +169,16 @@ static void registerRoutes() {
 }
 
 void connectWiFi(const char* ssid, const char* password) {
-    IPAddress local_ip, gateway_ip, subnet_mask;
-    local_ip.fromString(STATIC_IP);
-    gateway_ip.fromString(GATEWAY);
-    subnet_mask.fromString(SUBNET);
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true, true);
+    delay(100);
+
+    // Giữ kết nối ổn định cho poll liên tục, giảm lag ping
+    WiFi.setSleep(false);
     
-    if (!WiFi.config(local_ip, gateway_ip, subnet_mask)) {
-        Serial.println("[WiFi] Static IP config failed, using DHCP");
-    }
-    
+    // Giảm TX Power để tránh sụt áp khi rút cáp Type-C
+    WiFi.setTxPower(WIFI_POWER_15dBm);
+
     WiFi.begin(ssid, password);
     Serial.print("[WiFi] Connecting");
     while (WiFi.status() != WL_CONNECTED) {
@@ -185,8 +186,15 @@ void connectWiFi(const char* ssid, const char* password) {
         Serial.print(".");
     }
     Serial.println();
-    Serial.print("[WiFi] Static IP: ");
+    Serial.println("[WiFi] Connected");
+    Serial.print("[WiFi] SSID: ");
+    Serial.println(WiFi.SSID());
+    Serial.print("[WiFi] Local IP: ");
     Serial.println(WiFi.localIP());
+    Serial.print("[WiFi] Gateway: ");
+    Serial.println(WiFi.gatewayIP());
+    Serial.print("[WiFi] Subnet: ");
+    Serial.println(WiFi.subnetMask());
 }
 
 void startWebServer() {

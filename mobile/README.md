@@ -4,8 +4,8 @@ Native Android controller for the ESP32-S3 line-following robot over WiFi.
 
 ## Features
 
-- Live camera feed from `/snapshot` endpoint (polls every 150ms)
-- Hold-to-move controls: Forward, Left, Right, Stop
+- Live camera feed from `/snapshot` endpoint (polls every 250ms)
+- Hold-to-move controls: Forward, Left, Right, Backward, Stop
 - Connection status badge (Connected/Disconnected)
 - Configurable robot IP address in Settings
 - Dark theme with large touch targets
@@ -24,6 +24,7 @@ Native Android controller for the ESP32-S3 line-following robot over WiFi.
 - `POST /forward`
 - `POST /left`
 - `POST /right`
+- `POST /backward`
 - `POST /stop`
 
 ## Usage
@@ -31,7 +32,7 @@ Native Android controller for the ESP32-S3 line-following robot over WiFi.
 1. Open the app
 2. Tap the settings icon to set your robot's IP address (default: `http://192.168.43.200`)
 3. Hold a movement button to drive; release to stop
-4. The center and bottom buttons are always Stop
+4. The center button is always Stop; the bottom button is Backward
 
 ## File Structure
 

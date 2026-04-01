@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class RobotService {
   static const String _keyBaseUrl = 'robot_base_url';
-  static const String _defaultBaseUrl = 'http://192.168.43.200';
+  static const String _defaultBaseUrl = 'http://10.64.104.208';
 
   String _baseUrl = _defaultBaseUrl;
+  final http.Client _client = http.Client();
 
   Future<void> loadBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
@@ -28,7 +30,7 @@ class RobotService {
 
   Future<bool> checkConnection() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$_baseUrl/'),
       ).timeout(const Duration(milliseconds: 500));
       return response.statusCode == 200;
@@ -37,13 +39,29 @@ class RobotService {
     }
   }
 
+  Future<Uint8List?> fetchSnapshotBytes() async {
+    try {
+      final response = await _client.get(
+        Uri.parse(getSnapshotUrl()),
+      ).timeout(const Duration(milliseconds: 1500));
+      if (response.statusCode == 200) return response.bodyBytes;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> sendCommand(String cmd) async {
     try {
-      await http.post(
+      await _client.post(
         Uri.parse('$_baseUrl/$cmd'),
       ).timeout(const Duration(milliseconds: 500));
     } catch (_) {
       // Silently ignore network errors for fire-and-forget behavior
     }
+  }
+
+  void dispose() {
+    _client.close();
   }
 }

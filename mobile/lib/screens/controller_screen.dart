@@ -158,11 +158,13 @@ class _ControllerScreenState extends State<ControllerScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Stop button (bottom)
+                  // Backward button (bottom)
                   ControlButton(
-                    backgroundColor: Colors.red,
-                    onPressed: () => _sendCommand('stop'),
-                    child: const Icon(Icons.stop, color: Colors.white, size: 32),
+                    backgroundColor: Colors.orange,
+                    onPressed: () => _sendCommand('backward'),
+                    onReleased: () => _sendCommand('stop'),
+                    onCanceled: () => _sendCommand('stop'),
+                    child: const Icon(Icons.arrow_downward, color: Colors.white, size: 32),
                   ),
                 ],
               ),

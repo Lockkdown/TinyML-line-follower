@@ -7,6 +7,7 @@ import '../services/capture_service.dart';
 import '../services/robot_service.dart';
 import '../services/transfer_service.dart';
 import '../widgets/class_selector_button.dart';
+import '../widgets/zone_overlay_painter.dart';
 
 const List<String> _classNames = ['forward', 'left', 'right', 'nothing'];
 
@@ -33,6 +34,7 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
   Timer? _countdownTimer;
 
   bool _captureReady = false;
+  bool _showZoneOverlay = true;
 
 
   Uint8List? _cameraFrame;
@@ -47,6 +49,11 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
   void initState() {
     super.initState();
     _captureService = CaptureService(robotService: widget.robotService);
+    _initAsync();
+  }
+
+  Future<void> _initAsync() async {
+    await _captureService.init();
     _loadCounts();
     _requestPermissions();
     _startCameraLoop();
@@ -253,6 +260,11 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
         title: const Text('DATASET COLLECTION'),
         actions: [
           IconButton(
+            icon: Icon(_showZoneOverlay ? Icons.grid_on : Icons.grid_off),
+            tooltip: _showZoneOverlay ? 'Hide Zone Overlay' : 'Show Zone Overlay',
+            onPressed: () => setState(() => _showZoneOverlay = !_showZoneOverlay),
+          ),
+          IconButton(
             icon: Icon(_serverRunning ? Icons.wifi_off : Icons.wifi),
             tooltip: _serverRunning ? 'Stop Transfer Server' : 'WiFi Transfer',
             color: _serverRunning ? Colors.greenAccent : null,
@@ -286,12 +298,12 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
             ),
             const SizedBox(height: 8),
             Expanded(
-              flex: 3,
+              flex: 4,
               child: _buildCameraPreview(),
             ),
             const SizedBox(height: 8),
             Expanded(
-              flex: 4,
+              flex: 3,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -316,15 +328,22 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       clipBehavior: Clip.antiAlias,
-      child: _cameraFrame != null
-          ? Image.memory(
-              _cameraFrame!,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => _buildCameraPlaceholder(),
-            )
-          : _buildCameraPlaceholder(),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _cameraFrame != null
+              ? Image.memory(
+                  _cameraFrame!,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => _buildCameraPlaceholder(),
+                )
+              : _buildCameraPlaceholder(),
+          if (_showZoneOverlay && _cameraFrame != null)
+            CustomPaint(painter: ZoneOverlayPainter()),
+        ],
+      ),
     );
   }
 

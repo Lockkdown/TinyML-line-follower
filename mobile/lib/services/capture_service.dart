@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'robot_service.dart';
 
@@ -13,8 +14,13 @@ const String _datasetRoot = 'TinyRobot_Dataset';
 
 class CaptureService {
   final RobotService robotService;
+  late SharedPreferences _prefs;
 
   CaptureService({required this.robotService});
+
+  Future<void> init() async {
+    _prefs = await SharedPreferences.getInstance();
+  }
 
   Future<bool> requestStoragePermission() async {
     if (Platform.isAndroid) {
@@ -43,12 +49,9 @@ class CaptureService {
     try {
       final dir = await _classDirectory(className);
       final now = DateTime.now();
-      final pad = (int n) => n.toString().padLeft(2, '0');
-      final timestamp =
-          '${now.year}${pad(now.month)}${pad(now.day)}_'
-          '${pad(now.hour)}${pad(now.minute)}${pad(now.second)}_'
-          '${now.millisecond}';
-      final file = File('${dir.path}/${className}_$timestamp.jpg');
+      final date = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+      final seq = _getNextSequence(className, date);
+      final file = File('${dir.path}/${className}_${date}_$seq.jpg');
       await file.writeAsBytes(bytes);
       return true;
     } on FileSystemException {
@@ -56,10 +59,24 @@ class CaptureService {
     }
   }
 
+  int _getNextSequence(String className, String date) {
+    final key = 'seq_${className}_$date';
+    final seq = _prefs.getInt(key) ?? 0;
+    _prefs.setInt(key, seq + 1);
+    return seq + 1;
+  }
+
   Future<int> countImages(String className) async {
     try {
       final dir = await _classDirectory(className);
       final files = dir.listSync().whereType<File>().toList();
+      if (files.isEmpty) {
+        // Reset all sequence counters for this class
+        final keys = _prefs.getKeys().where((k) => k.startsWith('seq_$className'));
+        for (final key in keys) {
+          await _prefs.remove(key);
+        }
+      }
       return files.length;
     } on FileSystemException {
       return 0;

@@ -1,0 +1,4 @@
+model_name,accuracy,macro_f1,f1_forward,f1_left,f1_right,f1_nothing
+lenet5,1.0000,1.0000,1.0000,1.0000,1.0000,1.0000
+mobilenet_v1_025,0.9103,0.8636,0.9545,0.8750,0.6250,1.0000
+mobilenet_v1_05,0.9359,0.9303,0.8889,0.9091,0.9231,1.0000

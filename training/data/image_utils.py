@@ -31,6 +31,12 @@ def normalize_to_minus1_1(image: tf.Tensor) -> tf.Tensor:
     return (image / 127.5) - 1.0
 
 
+def normalize_image(image: np.ndarray) -> np.ndarray:
+    """Convert uint8 numpy image to float32 in [-1.0, 1.0]."""
+    # formula: (pixel / 127.5) - 1.0
+    return (image.astype(np.float32) / 127.5) - 1.0
+
+
 def is_valid_image(image_path: str) -> bool:
     """Return True if file exists, is readable, and decodes without error."""
     try:

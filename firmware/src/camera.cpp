@@ -34,7 +34,7 @@ static camera_config_t buildCameraConfig() {
     config.ledc_channel = LEDC_CHANNEL_4;
 
     config.pixel_format = PIXFORMAT_JPEG;
-    config.frame_size   = FRAMESIZE_QVGA; // 320x240
+    config.frame_size   = FRAMESIZE_QVGA;
     config.jpeg_quality = STREAM_QUALITY_DEFAULT;
     config.fb_count     = 2;
     config.fb_location  = CAMERA_FB_IN_PSRAM;

@@ -39,11 +39,13 @@ class RobotService {
     }
   }
 
-  Future<Uint8List?> fetchSnapshotBytes() async {
+  Future<Uint8List?> fetchSnapshotBytes({
+    Duration timeout = const Duration(milliseconds: 300),
+  }) async {
     try {
       final response = await _client.get(
         Uri.parse(getSnapshotUrl()),
-      ).timeout(const Duration(milliseconds: 300)); // Reduce to 300ms for faster frame dropping
+      ).timeout(timeout);
       if (response.statusCode == 200) return response.bodyBytes;
       return null;
     } on SocketException {

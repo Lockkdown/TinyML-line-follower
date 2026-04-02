@@ -19,6 +19,7 @@ class TrainConfig:
     learning_rate: float
     validation_split: float
     test_split: float
+    use_augmentation: bool
     dropout: float
     l2_reg: float
 
@@ -45,6 +46,7 @@ def load_config(config_path: str) -> TrainConfig:
         learning_rate=data["learning_rate"],
         validation_split=data["validation_split"],
         test_split=data["test_split"],
+        use_augmentation=data.get("use_augmentation", True),
         dropout=data["dropout"],
         l2_reg=data["l2_reg"],
     )

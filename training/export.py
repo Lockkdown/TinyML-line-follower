@@ -52,6 +52,8 @@ def export_tflite(model_name: str, saved_model_path: str, output_dir: str) -> No
     # (For now, copy all models - user can select later)
     OUTPUT_TFLITE.mkdir(parents=True, exist_ok=True)
     canonical_path = OUTPUT_TFLITE / f"{model_name}_model_int8.tflite"
+    if canonical_path.exists():
+        canonical_path.unlink()
     Path(tflite_path).rename(canonical_path)
     print(f"Moved to: {canonical_path}")
 

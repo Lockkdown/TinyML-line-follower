@@ -3,6 +3,7 @@
 #include "camera.h"
 #include "wifi_config.h"
 #include "wifi_controller.h"
+#include "inference.h"
 
 void setup() {
     Serial.begin(115200);
@@ -15,6 +16,9 @@ void setup() {
     connectWiFi(WIFI_SSID, WIFI_PASSWORD);
     startWebServer();
     initMotor();
+    if (!initInference()) {
+        Serial.println("[MAIN] Inference init failed — CNN mode unavailable");
+    }
 }
 
 void loop() {}

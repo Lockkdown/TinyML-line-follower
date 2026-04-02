@@ -44,11 +44,13 @@ def verify_tflite(tflite_path: str) -> dict:
     # Get details
     input_details = interpreter.get_input_details()[0]
     output_details = interpreter.get_output_details()[0]
+    input_shape = input_details['shape'].tolist()
+    output_shape = output_details['shape'].tolist()
     
     # Verify specs
-    assert input_details['shape'] == [1, 96, 96, 1], f"Wrong input shape: {input_details['shape']}"
+    assert input_shape == [1, 96, 96, 1], f"Wrong input shape: {input_shape}"
     assert input_details['dtype'] == np.int8, f"Wrong input dtype: {input_details['dtype']}"
-    assert output_details['shape'] == [1, 4], f"Wrong output shape: {output_details['shape']}"
+    assert output_shape == [1, 4], f"Wrong output shape: {output_shape}"
     assert output_details['dtype'] == np.int8, f"Wrong output dtype: {output_details['dtype']}"
     
     # Run dummy inference
@@ -61,9 +63,9 @@ def verify_tflite(tflite_path: str) -> dict:
     file_size_kb = Path(tflite_path).stat().st_size / 1024
     
     return {
-        'input_shape': input_details['shape'].tolist(),
+        'input_shape': input_shape,
         'input_dtype': str(input_details['dtype']),
-        'output_shape': output_details['shape'].tolist(),
+        'output_shape': output_shape,
         'output_dtype': str(output_details['dtype']),
         'file_size_kb': file_size_kb,
         'verified': True

@@ -8,8 +8,8 @@ from training.model.model_config import ModelConfig
 
 
 def _replicate_grayscale_channel(input_tensor: tf.Tensor) -> tf.Tensor:
-    """Replicate (H,W,1) → (H,W,3) to match ImageNet pretrained input."""
-    return tf.repeat(input_tensor, 3, axis=-1)
+    """Replicate (H,W,1) → (H,W,3) using Concat to avoid TILE op which is unsupported in some TFLM versions."""
+    return tf.concat([input_tensor, input_tensor, input_tensor], axis=-1)
 
 
 def _get_base_model(cfg: ModelConfig) -> tf.keras.Model:

@@ -4,9 +4,9 @@
 
 import tensorflow as tf
 
-BRIGHTNESS_DELTA: float = 0.25   # ±25% brightness shift
-CONTRAST_LOWER: float   = 0.75   # contrast range lower bound
-CONTRAST_UPPER: float   = 1.25   # contrast range upper bound
+BRIGHTNESS_DELTA: float = 0.2    # ±20% brightness shift
+CONTRAST_LOWER: float   = 0.8    # contrast range lower bound
+CONTRAST_UPPER: float   = 1.2    # contrast range upper bound
 NOISE_STDDEV: float     = 0.05   # gaussian noise std in [-1,1] space (~6/255)
 
 
@@ -28,9 +28,14 @@ def add_gaussian_noise(image: tf.Tensor) -> tf.Tensor:
     return tf.clip_by_value(image + noise, -1.0, 1.0)
 
 
-def apply_augmentation(image: tf.Tensor) -> tf.Tensor:
+def augment_image(image: tf.Tensor) -> tf.Tensor:
     """Apply full augmentation chain to a single image tensor."""
     # order: brightness_contrast → gaussian_noise
     image = random_brightness_contrast(image)
     image = add_gaussian_noise(image)
     return image
+
+
+def apply_augmentation(dataset: tf.data.Dataset) -> tf.data.Dataset:
+    """Apply augment_image to image/label pairs in dataset."""
+    return dataset.map(lambda x, y: (augment_image(x), y), num_parallel_calls=tf.data.AUTOTUNE)

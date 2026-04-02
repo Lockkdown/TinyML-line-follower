@@ -3,6 +3,7 @@
 # dependencies: all builders, dataset_loader, metrics, confusion_matrix, TrainConfig
 
 import os
+import shutil
 import sys
 import numpy as np
 import tensorflow as tf
@@ -58,20 +59,29 @@ def get_model_builder(model_name: str) -> callable:
     return MODEL_REGISTRY[model_name]
 
 
-def get_callbacks(model_name: str, output_dir: str) -> list:
+def get_callbacks(model_name: str, exp_dir: Path) -> list:
     """
-    Return standard callback list:
-    - ModelCheckpoint: save best val_accuracy to outputs/experiments/<model_name>/
-    - EarlyStopping: patience=10, monitor=val_loss, restore_best_weights=True
-    - ReduceLROnPlateau: factor=0.5, patience=5, monitor=val_loss
+    Standard callbacks for all models:
+    - EarlyStopping: patience=7, restore_best_weights
+    - ModelCheckpoint: save best val_accuracy weights
+    - ReduceLROnPlateau: factor=0.5, patience=3, monitor=val_loss
     """
+    best_weights_path = exp_dir / "best.weights.h5"
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
-            monitor='val_loss',
-            patience=5,
+            monitor='val_accuracy',
+            patience=7,
             min_delta=0.001,
             restore_best_weights=True,
             verbose=1
+        ),
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=str(best_weights_path),
+            monitor="val_accuracy",
+            save_best_only=True,
+            save_weights_only=True,
+            mode="max",
+            verbose=1,
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor='val_loss',
@@ -79,12 +89,6 @@ def get_callbacks(model_name: str, output_dir: str) -> list:
             patience=3,
             verbose=1
         ),
-        tf.keras.callbacks.ModelCheckpoint(
-            filepath=output_dir / "best.keras",
-            monitor='val_accuracy',
-            save_best_only=True,
-            verbose=1
-        )
     ]
     return callbacks
 
@@ -121,6 +125,16 @@ def run_training(cfg: TrainConfig) -> None:
         # Setup output directory
         output_dir = OUTPUT_EXP / model_name
         output_dir.mkdir(parents=True, exist_ok=True)
+        best_weights_path = output_dir / "best.weights.h5"
+        confusion_matrix_path = output_dir / "confusion_matrix.png"
+        saved_model_path = output_dir / "saved_model"
+        
+        if best_weights_path.exists():
+            best_weights_path.unlink()
+        if confusion_matrix_path.exists():
+            confusion_matrix_path.unlink()
+        if saved_model_path.exists():
+            shutil.rmtree(saved_model_path)
         
         # Phase 1 training
         print(f"\nPhase 1: Training {model_name}")
@@ -147,6 +161,11 @@ def run_training(cfg: TrainConfig) -> None:
                 verbose=2
             )
         
+        if not best_weights_path.exists():
+            raise FileNotFoundError(f"Best weights not found: {best_weights_path}")
+        model.load_weights(str(best_weights_path))
+        print(f"Loaded best weights: {best_weights_path}")
+        
         # Evaluate on test set
         print(f"\nEvaluating {model_name} on test set...")
         y_true = []
@@ -162,12 +181,10 @@ def run_training(cfg: TrainConfig) -> None:
         log_metrics(metrics, model_name)
         
         # Plot confusion matrix
-        cm_path = output_dir / "confusion_matrix.png"
-        plot_confusion_matrix(y_true, y_pred, ["forward", "left", "right", "nothing"], str(cm_path))
-        print(f"Confusion matrix saved: {cm_path}")
+        plot_confusion_matrix(y_true, y_pred, ["forward", "left", "right", "nothing"], str(confusion_matrix_path))
+        print(f"Confusion matrix saved: {confusion_matrix_path}")
         
         # Save model
-        saved_model_path = output_dir / "saved_model"
         model.export(str(saved_model_path))
         print(f"Model saved: {saved_model_path}")
 
@@ -179,6 +196,10 @@ def main():
     # Load config
     cfg = load_config(str(CONFIG_PATH))
     print(f"Config loaded: {cfg.model_name}, epochs={cfg.epochs}, fine_tune_epochs={cfg.fine_tune_epochs}")
+    report_path = ROOT_DIR / "outputs" / "reports" / "comparison_table.csv"
+    if report_path.exists():
+        report_path.unlink()
+        print(f"Reset report: {report_path}")
     
     # Run training
     run_training(cfg)

@@ -48,6 +48,14 @@
       ]
     },
     {
+      "name": "archive",
+      "version": "3.6.1",
+      "dependencies": [
+        "crypto",
+        "path"
+      ]
+    },
+    {
       "name": "network_info_plus",
       "version": "5.0.3",
       "dependencies": [
@@ -225,6 +233,13 @@
         "stream_channel",
         "string_scanner",
         "term_glyph"
+      ]
+    },
+    {
+      "name": "crypto",
+      "version": "3.0.7",
+      "dependencies": [
+        "typed_data"
       ]
     },
     {
@@ -501,6 +516,13 @@
       ]
     },
     {
+      "name": "typed_data",
+      "version": "1.4.0",
+      "dependencies": [
+        "collection"
+      ]
+    },
+    {
       "name": "plugin_platform_interface",
       "version": "2.1.8",
       "dependencies": [
@@ -515,13 +537,6 @@
         "ffi",
         "meta",
         "xml"
-      ]
-    },
-    {
-      "name": "typed_data",
-      "version": "1.4.0",
-      "dependencies": [
-        "collection"
       ]
     },
     {
@@ -647,21 +662,6 @@
         "collection",
         "source_span",
         "string_scanner"
-      ]
-    },
-    {
-      "name": "crypto",
-      "version": "3.0.7",
-      "dependencies": [
-        "typed_data"
-      ]
-    },
-    {
-      "name": "archive",
-      "version": "3.6.1",
-      "dependencies": [
-        "crypto",
-        "path"
       ]
     }
   ],

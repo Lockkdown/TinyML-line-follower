@@ -4,8 +4,17 @@ import '../services/robot_service.dart';
 
 class CameraView extends StatefulWidget {
   final RobotService robotService;
+  final Duration snapshotTimeout;
+  final int minDelayMs;
+  final int maxDelayMs;
 
-  const CameraView({super.key, required this.robotService});
+  const CameraView({
+    super.key,
+    required this.robotService,
+    this.snapshotTimeout = const Duration(milliseconds: 300),
+    this.minDelayMs = 33,
+    this.maxDelayMs = 250,
+  });
 
   @override
   State<CameraView> createState() => _CameraViewState();
@@ -16,12 +25,13 @@ class _CameraViewState extends State<CameraView> {
   bool _showError = false;
   int _consecutiveFailures = 0;
   bool _disposed = false;
-  int _currentDelay = 33; // Start with ~30 FPS
+  late int _currentDelay;
   int _backoffMultiplier = 1;
 
   @override
   void initState() {
     super.initState();
+    _currentDelay = widget.minDelayMs;
     _fetchLoop();
   }
 
@@ -34,39 +44,38 @@ class _CameraViewState extends State<CameraView> {
   Future<void> _fetchLoop() async {
     while (!_disposed) {
       final startTime = DateTime.now();
-      final bytes = await widget.robotService.fetchSnapshotBytes();
+      final bytes = await widget.robotService.fetchSnapshotBytes(
+        timeout: widget.snapshotTimeout,
+      );
 
       if (_disposed) break;
 
       if (bytes != null) {
         _consecutiveFailures = 0;
         _backoffMultiplier = 1;
-        
-        // Adaptive delay: reduce to 33ms for 30 FPS when network is good
-        if (_currentDelay > 33) {
-          _currentDelay = (_currentDelay - 10).clamp(33, 100);
+
+        if (_currentDelay > widget.minDelayMs) {
+          _currentDelay = (_currentDelay - 10).clamp(widget.minDelayMs, widget.maxDelayMs);
         }
-        
+
         if (mounted) {
           setState(() {
             _frameBytes = bytes;
             _showError = false;
           });
         }
-        
-        // Calculate actual time spent and adjust delay
+
         final elapsed = DateTime.now().difference(startTime).inMilliseconds;
         final adjustedDelay = (_currentDelay - elapsed).clamp(10, _currentDelay);
         await Future.delayed(Duration(milliseconds: adjustedDelay));
       } else {
         _consecutiveFailures++;
-        
-        // Exponential backoff on failures
+
         if (_consecutiveFailures >= 2) {
           _backoffMultiplier = (_backoffMultiplier * 2).clamp(1, 8);
-          _currentDelay = (33 * _backoffMultiplier).clamp(33, 250);
+          _currentDelay = (widget.minDelayMs * _backoffMultiplier).clamp(widget.minDelayMs, widget.maxDelayMs);
         }
-        
+
         if (mounted && _consecutiveFailures >= 5) {
           setState(() {
             _frameBytes = null;

@@ -5,6 +5,7 @@ import '../widgets/camera_view.dart';
 import '../widgets/control_button.dart';
 import 'dataset_collection_screen.dart';
 import 'settings_screen.dart';
+import 'cnn_mode_screen.dart';
 
 class ControllerScreen extends StatefulWidget {
   const ControllerScreen({super.key});
@@ -108,6 +109,33 @@ class _ControllerScreenState extends State<ControllerScreen> {
     );
   }
 
+  void _openCnnMode() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Bật CNN Mode'),
+        content: const Text('Xe sẽ tự lái dựa trên camera.\n\nBạn có chắc chắn?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Huỷ'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => CnnModeScreen(robotService: _robotService),
+                ),
+              );
+            },
+            child: const Text('Bật CNN'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openSettings() async {
     final result = await Navigator.of(context).push<String>(
       MaterialPageRoute(
@@ -158,6 +186,11 @@ class _ControllerScreenState extends State<ControllerScreen> {
                   onPressed: _openDatasetCollection,
                   icon: const Icon(Icons.dataset),
                   tooltip: 'Dataset Collection',
+                ),
+                IconButton(
+                  onPressed: _openCnnMode,
+                  icon: const Icon(Icons.psychology),
+                  tooltip: 'CNN Mode',
                 ),
                 IconButton(
                   onPressed: _openSettings,

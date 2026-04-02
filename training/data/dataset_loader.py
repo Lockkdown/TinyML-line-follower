@@ -55,7 +55,8 @@ def load_dataset(data_dir: str, cfg: TrainConfig) -> tuple[tf.data.Dataset, tf.d
     train_ds = train_ds.shuffle(buffer_size=train_size, seed=42, reshuffle_each_iteration=True)
     
     # Apply augmentation to train set only
-    train_ds = apply_augmentation(train_ds)
+    if cfg.use_augmentation:
+        train_ds = apply_augmentation(train_ds)
     
     # Batch and prefetch
     train_ds = train_ds.batch(cfg.batch_size).prefetch(tf.data.AUTOTUNE)
@@ -68,29 +69,37 @@ def load_dataset(data_dir: str, cfg: TrainConfig) -> tuple[tf.data.Dataset, tf.d
 def make_representative_dataset(data_dir: str, num_samples: int = 100) -> callable:
     """Generate representative dataset for INT8 quantization from train directory."""
     def generator():
-        # Load from dataset/processed/train/ (already preprocessed)
         train_dir = Path(data_dir).parent / "processed" / "train"
-        if not train_dir.exists():
-            raise FileNotFoundError(f"Processed train directory not found: {train_dir}")
-        
-        # Collect all image paths
+        source_dir = train_dir if train_dir.exists() else Path(data_dir)
+
         all_paths = []
-        for class_dir in train_dir.iterdir():
+        for class_dir in source_dir.iterdir():
             if class_dir.is_dir():
                 all_paths.extend(list(class_dir.glob("*.jpg")))
+                all_paths.extend(list(class_dir.glob("*.jpeg")))
                 all_paths.extend(list(class_dir.glob("*.png")))
-        
-        # Randomly sample
+
+        if not all_paths and train_dir.exists():
+            source_dir = Path(data_dir)
+            for class_dir in source_dir.iterdir():
+                if class_dir.is_dir():
+                    all_paths.extend(list(class_dir.glob("*.jpg")))
+                    all_paths.extend(list(class_dir.glob("*.jpeg")))
+                    all_paths.extend(list(class_dir.glob("*.png")))
+
+        if not all_paths:
+            raise FileNotFoundError(f"No representative images found in: {source_dir}")
+
         np.random.shuffle(all_paths)
         selected_paths = all_paths[:num_samples]
-        
+
         for img_path in selected_paths:
-            # Load and preprocess exactly like training
             raw = tf.io.read_file(str(img_path))
             img = tf.image.decode_image(raw, channels=1, expand_animations=False)
             img = tf.image.resize(img, [96, 96])
             img = tf.cast(img, tf.float32)
-            img = (img / 127.5) - 1.0  # normalize to [-1, 1]
+            img = (img / 127.5) - 1.0
+            img = tf.expand_dims(img, axis=0)
             yield [img]
     
     return generator

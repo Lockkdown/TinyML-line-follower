@@ -15,9 +15,12 @@ class TrainConfig:
     num_classes: int
     batch_size: int
     epochs: int
+    fine_tune_epochs: int
     learning_rate: float
     validation_split: float
     test_split: float
+    dropout: float
+    l2_reg: float
 
 
 def load_config(config_path: str) -> TrainConfig:
@@ -38,7 +41,10 @@ def load_config(config_path: str) -> TrainConfig:
         num_classes=data["num_classes"],
         batch_size=data["batch_size"],
         epochs=data["epochs"],
+        fine_tune_epochs=data["fine_tune_epochs"],
         learning_rate=data["learning_rate"],
         validation_split=data["validation_split"],
         test_split=data["test_split"],
+        dropout=data["dropout"],
+        l2_reg=data["l2_reg"],
     )

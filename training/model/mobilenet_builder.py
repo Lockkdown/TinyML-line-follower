@@ -29,7 +29,7 @@ def _build_classification_head(base_output: tf.Tensor, cfg: ModelConfig) -> tf.T
     """Add GlobalAveragePooling + Dropout + Dense(4, softmax) on top of base."""
     x = tf.keras.layers.GlobalAveragePooling2D()(base_output)
     x = tf.keras.layers.Dropout(cfg.dropout)(x)
-    return tf.keras.layers.Dense(cfg.num_classes, activation="softmax")(x)
+    return tf.keras.layers.Dense(cfg.num_classes, activation="softmax", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
 
 
 def build_mobilenet(cfg: ModelConfig) -> tf.keras.Model:

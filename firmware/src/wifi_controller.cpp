@@ -4,6 +4,7 @@
 
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -20,6 +21,18 @@ static AsyncWebServer server(80);
 uint8_t g_speed = 180;
 static volatile bool g_cnnTransitionScheduled = false;
 static volatile bool g_wifiReconnectTaskStarted = false;
+
+static bool parseFrameSize(const String& resolution, framesize_t* outFrameSize) {
+    if (resolution == "QQVGA") {
+        *outFrameSize = FRAMESIZE_QQVGA;
+        return true;
+    }
+    if (resolution == "QVGA") {
+        *outFrameSize = FRAMESIZE_QVGA;
+        return true;
+    }
+    return false;
+}
 
 static const char* modeToString(RobotMode mode) {
     switch (mode) {
@@ -138,6 +151,47 @@ static void registerRoutes() {
         json += "\"}";
         request->send(200, "application/json", json);
     });
+
+    server.on(
+        "/camera-config",
+        HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t, size_t) {
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, data, len);
+            if (error) {
+                request->send(400, "application/json", "{\"error\":\"invalid_json\"}");
+                return;
+            }
+
+            if (!doc["quality"].is<int>() || !doc["brightness"].is<int>() || !doc["resolution"].is<const char*>()) {
+                request->send(400, "application/json", "{\"error\":\"missing_or_invalid_fields\"}");
+                return;
+            }
+
+            int quality = doc["quality"].as<int>();
+            int brightness = doc["brightness"].as<int>();
+            String resolution = String(doc["resolution"].as<const char*>());
+            framesize_t frameSize;
+            if (!parseFrameSize(resolution, &frameSize)) {
+                request->send(400, "application/json", "{\"error\":\"invalid_resolution\"}");
+                return;
+            }
+
+            quality = constrain(quality, 10, 63);
+            brightness = constrain(brightness, -2, 2);
+            sensor_t* sensor = esp_camera_sensor_get();
+            if (sensor == nullptr) {
+                request->send(400, "application/json", "{\"error\":\"camera_sensor_unavailable\"}");
+                return;
+            }
+
+            sensor->set_quality(sensor, quality);
+            sensor->set_framesize(sensor, frameSize);
+            sensor->set_brightness(sensor, brightness);
+            request->send(200, "application/json", "{\"status\":\"ok\"}");
+        });
 
     server.on("/snapshot", HTTP_GET, [](AsyncWebServerRequest* request) {
         if (getRobotMode() != MODE_DATASET) {

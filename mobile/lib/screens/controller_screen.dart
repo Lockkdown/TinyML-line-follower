@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/robot_service.dart';
 import '../widgets/camera_view.dart';
 import '../widgets/control_button.dart';
-import 'dataset_collection_screen.dart';
+import 'dataset_capture_screen.dart';
 import 'settings_screen.dart';
 import 'cnn_mode_screen.dart';
 
@@ -162,7 +162,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
         .push<void>(
           MaterialPageRoute(
             builder: (context) =>
-                DatasetCollectionScreen(robotService: _robotService),
+                DatasetCaptureScreen(robotService: _robotService),
           ),
         )
         .then((_) {

@@ -35,23 +35,22 @@ class CnnService {
     try {
       final response = await _client.post(
         Uri.parse('${_robotService.baseUrl}/cnn/start'),
+        headers: {'Connection': 'close'},
       ).timeout(const Duration(milliseconds: 2000));
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      return body['status'] == 'started' || body['status'] == 'already_active';
+      return response.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
-  Future<bool> stopCnnMode() async {
+  Future<void> stopCnnMode() async {
     try {
-      final response = await _client.post(
+      await _client.post(
         Uri.parse('${_robotService.baseUrl}/cnn/stop'),
-      ).timeout(const Duration(milliseconds: 2000));
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      return body['status'] == 'stopped';
+        headers: {'Connection': 'close'},
+      ).timeout(const Duration(milliseconds: 500));
     } catch (_) {
-      return false;
+      // Fire and forget
     }
   }
 
@@ -59,10 +58,11 @@ class CnnService {
     try {
       final response = await _client.get(
         Uri.parse('${_robotService.baseUrl}/cnn/status'),
-      ).timeout(const Duration(milliseconds: 1000));
+        headers: {'Connection': 'close'},
+      ).timeout(const Duration(milliseconds: 300));
+      
       if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        return CnnStatus.fromJson(body);
+        return CnnStatus.fromJson(jsonDecode(response.body));
       }
       return null;
     } catch (_) {

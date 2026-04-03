@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <esp_camera.h>
 #include <img_converters.h>
+#include "camera.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/all_ops_resolver.h"
@@ -15,12 +16,12 @@ const unsigned char* getModelData();
 unsigned int getModelDataLen();
 
 // Tensor arena sizes to try in order
-static constexpr int ARENA_SIZES[] = {150 * 1024, 180 * 1024, 200 * 1024};
+static constexpr int ARENA_SIZES[] = {60 * 1024, 90 * 1024, 120 * 1024, 150 * 1024};
 static constexpr int NUM_ARENA_SIZES = sizeof(ARENA_SIZES) / sizeof(ARENA_SIZES[0]);
 
 // Global objects
 static uint8_t* tensor_arena = nullptr;
-static constexpr int kTensorArenaSize = ARENA_SIZES[NUM_ARENA_SIZES - 1]; // Max size
+static int g_tensorArenaSize = 0;
 static tflite::MicroInterpreter* interpreter = nullptr;
 static TfLiteTensor* input_tensor = nullptr;
 static TfLiteTensor* output_tensor = nullptr;
@@ -46,9 +47,9 @@ static bool ensureJpegRgbBuffer(size_t requiredSize) {
         jpegRgbBufferSize = 0;
     }
 
-    jpegRgbBuffer = (uint8_t*)heap_caps_malloc(requiredSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    jpegRgbBuffer = (uint8_t*)heap_caps_malloc(requiredSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!jpegRgbBuffer) {
-        jpegRgbBuffer = (uint8_t*)heap_caps_malloc(requiredSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        jpegRgbBuffer = (uint8_t*)heap_caps_malloc(requiredSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (!jpegRgbBuffer) {
         return false;
@@ -66,20 +67,6 @@ bool initInference() {
     }
     Serial.println("[INFERENCE] Model data OK");
 
-    // Allocate tensor arena (use max size to avoid fragmentation)
-    Serial.println("[INFERENCE] Allocating tensor arena...");
-    // Tensor arena must be 16-byte aligned. SPIRAM is preferred since PSRAM is enabled.
-    tensor_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!tensor_arena) {
-        Serial.println("[INFERENCE] FAILED: cannot allocate tensor arena in PSRAM, falling back to internal RAM");
-        tensor_arena = (uint8_t*)heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    if (!tensor_arena) {
-        Serial.println("[INFERENCE] FAILED: cannot allocate tensor arena");
-        return false;
-    }
-    Serial.printf("[INFERENCE] Arena allocated at %p, size %d\n", tensor_arena, kTensorArenaSize);
-
     // Map model
     Serial.println("[INFERENCE] Mapping model...");
     const unsigned char* modelData = getModelData();
@@ -88,8 +75,6 @@ bool initInference() {
     // Validate model data pointer
     if (!modelData || ((uintptr_t)modelData & 0x3) != 0) {
         Serial.println("[INFERENCE] FAILED: model data pointer is null or not 4-byte aligned");
-        heap_caps_free(tensor_arena);
-        tensor_arena = nullptr;
         return false;
     }
     
@@ -98,8 +83,6 @@ bool initInference() {
     Serial.printf("[INFERENCE] Model data length: %u bytes\n", modelLen);
     if (modelLen < 4) {
         Serial.println("[INFERENCE] FAILED: model data too small");
-        heap_caps_free(tensor_arena);
-        tensor_arena = nullptr;
         return false;
     }
     
@@ -109,24 +92,18 @@ bool initInference() {
     Serial.printf("[INFERENCE] Flatbuffer magic: %s\n", magic);
     if (strcmp(magic, "TFL3") != 0) {
         Serial.println("[INFERENCE] FAILED: invalid flatbuffer magic number (expected TFL3)");
-        heap_caps_free(tensor_arena);
-        tensor_arena = nullptr;
         return false;
     }
     
     const tflite::Model* model = tflite::GetModel(modelData);
     if (!model) {
         Serial.println("[INFERENCE] FAILED: GetModel returned null");
-        heap_caps_free(tensor_arena);
-        tensor_arena = nullptr;
         return false;
     }
     Serial.printf("[INFERENCE] Model mapped, version %d\n", model->version());
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         Serial.printf("[INFERENCE] FAILED: model schema version %d != %d\n",
                      model->version(), TFLITE_SCHEMA_VERSION);
-        heap_caps_free(tensor_arena);
-        tensor_arena = nullptr;
         return false;
     }
 
@@ -142,14 +119,24 @@ bool initInference() {
 
     for (int i = 0; i < NUM_ARENA_SIZES; ++i) {
         Serial.printf("[INFERENCE] Trying arena size %d KB...\n", ARENA_SIZES[i] / 1024);
-        
-        // Clean up previous attempt
+
+        if (tensor_arena != nullptr) {
+            heap_caps_free(tensor_arena);
+            tensor_arena = nullptr;
+        }
         if (interpreter != nullptr) {
             delete interpreter;
             interpreter = nullptr;
         }
-        
-        // Zero out arena to reset the internal allocator state
+
+        tensor_arena = (uint8_t*)heap_caps_malloc(ARENA_SIZES[i], MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (!tensor_arena) {
+            tensor_arena = (uint8_t*)heap_caps_malloc(ARENA_SIZES[i], MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (!tensor_arena) {
+            Serial.printf("[INFERENCE] arena %d KB allocation failed\n", ARENA_SIZES[i] / 1024);
+            continue;
+        }
         memset(tensor_arena, 0, ARENA_SIZES[i]);
 
         interpreter = new tflite::MicroInterpreter(
@@ -199,6 +186,8 @@ bool initInference() {
         }
 
         Serial.printf("[INFERENCE] OK with arena %d KB\n", ARENA_SIZES[i] / 1024);
+        g_tensorArenaSize = ARENA_SIZES[i];
+        Serial.printf("[INFERENCE] Arena final size: %d bytes\n", g_tensorArenaSize);
         Serial.println("[INFERENCE] initInference() SUCCESS");
         return true;
     }
@@ -206,6 +195,7 @@ bool initInference() {
     Serial.println("[INFERENCE] FAILED: all arena sizes failed");
     heap_caps_free(tensor_arena);
     tensor_arena = nullptr;
+    g_tensorArenaSize = 0;
     interpreter = nullptr;
     return false;
 }
@@ -217,8 +207,8 @@ int runInference() {
     }
 
     // Get frame from camera
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb || fb->len == 0) {
+    camera_fb_t* fb = nullptr;
+    if (!captureFrame(&fb) || !fb || fb->len == 0) {
         Serial.println("[INFERENCE] failed to get frame");
         if (fb) esp_camera_fb_return(fb);
         return -1;
@@ -227,6 +217,7 @@ int runInference() {
     // Check if frame is grayscale and 96x96
     // If not grayscale, we need to convert (simple luminance)
     // If not 96x96, we need to downsample (nearest neighbor)
+    bool isFastPathGrayscale96 = (fb->width == 96 && fb->height == 96 && fb->format == PIXFORMAT_GRAYSCALE);
     bool needResize = (fb->width != 96 || fb->height != 96);
     bool needGrayscale = (fb->format != PIXFORMAT_GRAYSCALE);
 
@@ -235,7 +226,9 @@ int runInference() {
     uint8_t* src = (uint8_t*)fb->buf;
     uint8_t* jpegRgb = nullptr;
 
-    if (needResize || needGrayscale) {
+    if (isFastPathGrayscale96) {
+        src = (uint8_t*)fb->buf;
+    } else if (needResize || needGrayscale) {
         if (fb->format == PIXFORMAT_JPEG) {
             size_t requiredSize = fb->width * fb->height * 3;
             if (!ensureJpegRgbBuffer(requiredSize)) {

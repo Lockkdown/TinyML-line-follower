@@ -56,6 +56,15 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
     await _captureService.init();
     _loadCounts();
     _requestPermissions();
+    final cameraOk = await widget.robotService.setCameraOn();
+    if (mounted && !cameraOk) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không bật được camera trên robot (dataset mode)'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
     _startCameraLoop();
     _loadPhoneIp();
   }
@@ -65,6 +74,7 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
     _cameraDisposed = true;
     _countdownTimer?.cancel();
     _transferService.stop();
+    widget.robotService.setCameraOff();
     super.dispose();
   }
 
@@ -137,13 +147,39 @@ class _DatasetCollectionScreenState extends State<DatasetCollectionScreen> {
   }
 
   Future<void> _startCameraLoop() async {
+    const int minDelayMs = 150;
+    const int failureBaseDelayMs = 500;
+    const int maxDelayMs = 2000;
+    const int maxBackoffMultiplier = 8;
+
+    int consecutiveFailures = 0;
+    int backoffMultiplier = 1;
+    int currentDelayMs = minDelayMs;
+
     while (!_cameraDisposed) {
       final bytes = await widget.robotService.fetchSnapshotBytes();
       if (_cameraDisposed) break;
-      if (bytes != null && mounted) {
-        setState(() => _cameraFrame = bytes);
+
+      if (bytes != null) {
+        consecutiveFailures = 0;
+        backoffMultiplier = 1;
+        currentDelayMs = minDelayMs;
+        if (mounted) {
+          setState(() => _cameraFrame = bytes);
+        }
+      } else {
+        consecutiveFailures++;
+        if (consecutiveFailures == 1) {
+          currentDelayMs = failureBaseDelayMs; // wait 500ms on first failure
+        } else {
+          backoffMultiplier =
+              (backoffMultiplier * 2).clamp(1, maxBackoffMultiplier);
+          currentDelayMs = (failureBaseDelayMs * backoffMultiplier)
+              .clamp(failureBaseDelayMs, maxDelayMs);
+        }
       }
-      await Future.delayed(const Duration(milliseconds: 100));
+
+      await Future.delayed(Duration(milliseconds: currentDelayMs));
     }
   }
 

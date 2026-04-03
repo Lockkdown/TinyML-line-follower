@@ -16,3 +16,7 @@ constexpr int PWM_CHANNEL_RIGHT = 3;
 
 void initMotor();
 void setMotor(int left_speed, int right_speed);
+void setMotorSmooth(int left_speed, int right_speed, int ramp_step);
+void setMotorTrim(float left_trim, float right_trim);
+float getLeftTrim();
+float getRightTrim();

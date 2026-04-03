@@ -31,8 +31,9 @@ class RobotService {
   Future<bool> checkConnection() async {
     try {
       final response = await _client.get(
-        Uri.parse('$_baseUrl/'),
-      ).timeout(const Duration(milliseconds: 500));
+        Uri.parse('$_baseUrl/ping'),
+        headers: {'Connection': 'close'},
+      ).timeout(const Duration(milliseconds: 1000));
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -40,22 +41,20 @@ class RobotService {
   }
 
   Future<Uint8List?> fetchSnapshotBytes({
-    Duration timeout = const Duration(milliseconds: 300),
+    Duration timeout = const Duration(milliseconds: 800),
   }) async {
     try {
       final response = await _client.get(
         Uri.parse(getSnapshotUrl()),
+        headers: {'Connection': 'close'},
       ).timeout(timeout);
       if (response.statusCode == 200) return response.bodyBytes;
       return null;
     } on SocketException {
-      // Network error - return null immediately
       return null;
     } on HttpException {
-      // HTTP error - return null immediately
       return null;
     } on TimeoutException {
-      // Timeout - return null immediately
       return null;
     } catch (_) {
       return null;
@@ -66,6 +65,7 @@ class RobotService {
     try {
       await _client.post(
         Uri.parse('$_baseUrl/$cmd'),
+        headers: {'Connection': 'close'},
       ).timeout(const Duration(milliseconds: 500));
     } catch (_) {
       // Silently ignore network errors for fire-and-forget behavior
@@ -76,11 +76,38 @@ class RobotService {
     try {
       await _client.post(
         Uri.parse('$_baseUrl/speed'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Connection': 'close'
+        },
         body: 'value=$value',
       ).timeout(const Duration(milliseconds: 500));
     } catch (_) {
       // Silently ignore
+    }
+  }
+
+  Future<bool> setCameraOn() async {
+    try {
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/camera/on'),
+        headers: {'Connection': 'close'},
+      ).timeout(const Duration(milliseconds: 1000));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> setCameraOff() async {
+    try {
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/camera/off'),
+        headers: {'Connection': 'close'},
+      ).timeout(const Duration(milliseconds: 1000));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
     }
   }
 

@@ -8,15 +8,25 @@ from training.model.model_config import ModelConfig
 
 
 def build_lenet5(cfg: ModelConfig) -> tf.keras.Model:
-    """Build and compile LeNet-5 variant. Input: (96, 96, 1). Output: 4 classes."""
+    """Build and compile a micro CNN optimized for ESP32 SRAM. Input: (96, 96, 1). Output: 4 classes."""
     inputs = tf.keras.Input(shape=(cfg.img_size, cfg.img_size, 1))
-    x = tf.keras.layers.Conv2D(32, 5, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(inputs)
+    
+    # Heavily downsample early to reduce MAC operations
+    x = tf.keras.layers.Conv2D(8, 3, strides=2, padding="same", activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(inputs)
     x = tf.keras.layers.MaxPooling2D()(x)
-    x = tf.keras.layers.Conv2D(64, 5, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
+    
+    x = tf.keras.layers.Conv2D(16, 3, padding="same", activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
     x = tf.keras.layers.MaxPooling2D()(x)
+    
+    x = tf.keras.layers.Conv2D(32, 3, padding="same", activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
+    x = tf.keras.layers.MaxPooling2D()(x)
+    
     x = tf.keras.layers.Flatten()(x)
-    x = tf.keras.layers.Dense(512, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
+    
+    # Keep dense layer tiny to fit in ESP32 Internal RAM (~100KB total size)
+    x = tf.keras.layers.Dense(32, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
     x = tf.keras.layers.Dropout(cfg.dropout)(x)
+    
     outputs = tf.keras.layers.Dense(cfg.num_classes, activation="softmax", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(x)
     model = tf.keras.Model(inputs, outputs)
     model.compile(

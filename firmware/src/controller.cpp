@@ -6,6 +6,18 @@
 #include "controller.h"
 #include "motor.h"
 
+static int g_cnn_base_speed = 180;
+
+void setCnnBaseSpeed(int speed) {
+    if (speed < CNN_SPEED_FORWARD) speed = CNN_SPEED_FORWARD;
+    if (speed > 255) speed = 255;
+    g_cnn_base_speed = speed;
+}
+
+int getCnnBaseSpeed() {
+    return g_cnn_base_speed;
+}
+
 void classToAction(int classIndex) {
     static bool trimInitialized = false;
     if (!trimInitialized) {
@@ -13,18 +25,22 @@ void classToAction(int classIndex) {
         trimInitialized = true;
     }
 
+    const int base = g_cnn_base_speed;
+    const int coast = (base / 2 > CNN_SPEED_COAST) ? base / 2 : CNN_SPEED_COAST;
+    Serial.printf("[CTRL] classToAction(%d) | base=%d | coast=%d\n", classIndex, base, coast);
+
     switch (classIndex) {
         case 0: // forward
-            setMotorSmooth(CNN_SPEED_FORWARD, CNN_SPEED_FORWARD, CNN_MOTOR_RAMP_STEP);
+            setMotorSmooth(base, base, CNN_MOTOR_RAMP_STEP);
             break;
         case 1: // left
-            setMotorSmooth(CNN_SPEED_TURN_INNER, CNN_SPEED_TURN_OUTER, CNN_MOTOR_RAMP_STEP);
+            setMotorSmooth(CNN_SPEED_TURN_LEFT_INNER, CNN_SPEED_TURN_LEFT_OUTER, CNN_MOTOR_RAMP_STEP);
             break;
         case 2: // right
-            setMotorSmooth(CNN_SPEED_TURN_OUTER, CNN_SPEED_TURN_INNER, CNN_MOTOR_RAMP_STEP);
+            setMotorSmooth(CNN_SPEED_TURN_RIGHT_OUTER, CNN_SPEED_TURN_RIGHT_INNER, CNN_MOTOR_RAMP_STEP);
             break;
         case 3: // nothing
-            setMotorSmooth(CNN_SPEED_COAST, CNN_SPEED_COAST, CNN_MOTOR_RAMP_STEP);
+            setMotorSmooth(coast, coast, CNN_MOTOR_RAMP_STEP);
             break;
         default:
             setMotor(0, 0);

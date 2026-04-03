@@ -135,6 +135,7 @@ void setRobotMode(RobotMode mode) {
             return;
         }
 
+        initMotor();
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
         startCnnLoop();

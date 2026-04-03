@@ -30,8 +30,9 @@ static camera_config_t buildCameraConfig() {
     config.pin_pclk     = PCLK_GPIO_NUM;
 
     config.xclk_freq_hz = XCLK_FREQ_HZ;
-    config.ledc_timer   = LEDC_TIMER_1;
-    // LEDC_CHANNEL_2 avoids conflict with motor PWM channels 2 & 3
+    // Keep camera XCLK on TIMER_0 so motor PWM channels 2/3 (TIMER_1) stay at 1kHz.
+    config.ledc_timer   = LEDC_TIMER_0;
+    // LEDC_CHANNEL_4 avoids channel conflict with motor PWM channels 2 & 3.
     config.ledc_channel = LEDC_CHANNEL_4;
 
     config.pixel_format = PIXFORMAT_JPEG;

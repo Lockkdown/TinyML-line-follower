@@ -72,8 +72,19 @@ void initMotor() {
 void setMotor(int left_speed, int right_speed) {
     int clamped_left = clampSpeed(left_speed);
     int clamped_right = clampSpeed(right_speed);
-    setLeftMotor(applyTrim(clamped_left, g_left_trim));
-    setRightMotor(applyTrim(clamped_right, g_right_trim));
+    int pwm_left = applyTrim(clamped_left, g_left_trim);
+    int pwm_right = applyTrim(clamped_right, g_right_trim);
+    Serial.printf(
+        "[MOTOR] setMotor in(L=%d,R=%d) pwm(L=%d,R=%d) trim(L=%.2f,R=%.2f)\n",
+        clamped_left,
+        clamped_right,
+        pwm_left,
+        pwm_right,
+        g_left_trim,
+        g_right_trim
+    );
+    setLeftMotor(pwm_left);
+    setRightMotor(pwm_right);
     g_last_left_speed = clamped_left;
     g_last_right_speed = clamped_right;
 }

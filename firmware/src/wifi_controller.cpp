@@ -14,9 +14,10 @@
 #include "wifi_config.h"
 #include "jpeg_response.h"
 #include "robot_mode.h"
+#include "controller.h"
 
 static AsyncWebServer server(80);
-uint8_t g_speed = 100;
+uint8_t g_speed = 180;
 static volatile bool g_cnnTransitionScheduled = false;
 static volatile bool g_wifiReconnectTaskStarted = false;
 
@@ -65,6 +66,7 @@ static void registerRoutes() {
             const AsyncWebParameter* p = request->getParam("value", true);
             int val = p->value().toInt();
             g_speed = constrain(val, 40, 255);
+            setCnnBaseSpeed(g_speed);
             request->send(200, "text/plain", "OK");
         } else {
             request->send(400, "text/plain", "Missing value");

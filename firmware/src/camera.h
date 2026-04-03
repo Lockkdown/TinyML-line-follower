@@ -1,5 +1,7 @@
 #pragma once
 
+#include <esp_camera.h>
+
 // Camera GPIO constants — GOOUUU ESP32-S3-CAM (matches codebase-context.md §8)
 constexpr int PWDN_GPIO_NUM  = -1;
 constexpr int RESET_GPIO_NUM = -1;
@@ -25,4 +27,7 @@ constexpr int XCLK_FREQ_HZ = 20000000;
 constexpr int STREAM_QUALITY_DEFAULT = 12;
 
 bool initCamera();
+bool initCameraForInference();
+bool deinitCamera();
+bool captureFrame(camera_fb_t** frame_buffer);
 void setStreamQuality(int quality);

@@ -7,18 +7,24 @@
 #include "motor.h"
 
 void classToAction(int classIndex) {
+    static bool trimInitialized = false;
+    if (!trimInitialized) {
+        setMotorTrim(CNN_LEFT_TRIM, CNN_RIGHT_TRIM);
+        trimInitialized = true;
+    }
+
     switch (classIndex) {
         case 0: // forward
-            setMotor(CNN_SPEED, CNN_SPEED);
+            setMotorSmooth(CNN_SPEED_FORWARD, CNN_SPEED_FORWARD, CNN_MOTOR_RAMP_STEP);
             break;
         case 1: // left
-            setMotor(CNN_SPEED / 2, CNN_SPEED);
+            setMotorSmooth(CNN_SPEED_TURN_INNER, CNN_SPEED_TURN_OUTER, CNN_MOTOR_RAMP_STEP);
             break;
         case 2: // right
-            setMotor(CNN_SPEED, CNN_SPEED / 2);
+            setMotorSmooth(CNN_SPEED_TURN_OUTER, CNN_SPEED_TURN_INNER, CNN_MOTOR_RAMP_STEP);
             break;
         case 3: // nothing
-            setMotor(0, 0);
+            setMotorSmooth(CNN_SPEED_COAST, CNN_SPEED_COAST, CNN_MOTOR_RAMP_STEP);
             break;
         default:
             setMotor(0, 0);

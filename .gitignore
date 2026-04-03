@@ -8,3 +8,4 @@ __pycache__/
 docs
 .windsurf/
 firmware/src/wifi_config.h
+.cursor

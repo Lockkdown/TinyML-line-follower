@@ -17,6 +17,8 @@ class ControllerScreen extends StatefulWidget {
 class _ControllerScreenState extends State<ControllerScreen> {
   final RobotService _robotService = RobotService();
   bool _connected = false;
+  bool _cameraEnabled = false;
+  bool _isCameraToggleBusy = false;
   Timer? _connectionTimer;
   double _speed = 100;
 
@@ -29,6 +31,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
   @override
   void dispose() {
     _connectionTimer?.cancel();
+    _robotService.dispose();
     super.dispose();
   }
 
@@ -55,6 +58,60 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   void _sendCommand(String cmd) {
     _robotService.sendCommand(cmd);
+  }
+
+  Future<void> _toggleCameraMode() async {
+    if (_isCameraToggleBusy) {
+      return;
+    }
+
+    setState(() {
+      _isCameraToggleBusy = true;
+    });
+
+    final bool success = _cameraEnabled
+        ? await _robotService.setCameraOff()
+        : await _robotService.setCameraOn();
+
+    if (!mounted) {
+      return;
+    }
+
+    if (success) {
+      setState(() {
+        _cameraEnabled = !_cameraEnabled;
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không thể đổi trạng thái camera')),
+      );
+    }
+
+    setState(() {
+      _isCameraToggleBusy = false;
+    });
+  }
+
+  Widget _buildCameraPanel() {
+    if (_cameraEnabled) {
+      return CameraView(robotService: _robotService);
+    }
+
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Text(
+            'Camera OFF - tap icon to enable',
+            style: TextStyle(color: Colors.grey, fontSize: 14),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSpeedControl() {
@@ -101,12 +158,18 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   void _openDatasetCollection() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) =>
-            DatasetCollectionScreen(robotService: _robotService),
-      ),
-    );
+    Navigator.of(context)
+        .push<void>(
+          MaterialPageRoute(
+            builder: (context) =>
+                DatasetCollectionScreen(robotService: _robotService),
+          ),
+        )
+        .then((_) {
+          if (mounted) {
+            setState(() => _cameraEnabled = false);
+          }
+        });
   }
 
   void _openCnnMode() {
@@ -183,6 +246,17 @@ class _ControllerScreenState extends State<ControllerScreen> {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
+                  onPressed: _toggleCameraMode,
+                  icon: _isCameraToggleBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(_cameraEnabled ? Icons.videocam : Icons.videocam_off),
+                  tooltip: _cameraEnabled ? 'Camera ON' : 'Camera OFF',
+                ),
+                IconButton(
                   onPressed: _openDatasetCollection,
                   icon: const Icon(Icons.dataset),
                   tooltip: 'Dataset Collection',
@@ -206,16 +280,13 @@ class _ControllerScreenState extends State<ControllerScreen> {
         child: Column(
           children: [
             Expanded(
-              flex: 4, // Thu nhỏ camera thêm 1 chút
-              child: CameraView(robotService: _robotService),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
               flex: 5, // Tăng không gian cho control để không bị cuộn/tràn
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    _buildCameraPanel(),
+                    const SizedBox(height: 16),
                     _buildSpeedControl(),
                     const SizedBox(height: 12),
                     // Forward button

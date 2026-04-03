@@ -11,9 +11,9 @@ class CameraView extends StatefulWidget {
   const CameraView({
     super.key,
     required this.robotService,
-    this.snapshotTimeout = const Duration(milliseconds: 300),
-    this.minDelayMs = 33,
-    this.maxDelayMs = 250,
+    this.snapshotTimeout = const Duration(milliseconds: 800),
+    this.minDelayMs = 150,
+    this.maxDelayMs = 500,
   });
 
   @override
@@ -66,12 +66,16 @@ class _CameraViewState extends State<CameraView> {
         }
 
         final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-        final adjustedDelay = (_currentDelay - elapsed).clamp(10, _currentDelay);
+        final adjustedDelay = (_currentDelay - elapsed).clamp(widget.minDelayMs, _currentDelay);
         await Future.delayed(Duration(milliseconds: adjustedDelay));
       } else {
         _consecutiveFailures++;
 
-        if (_consecutiveFailures >= 2) {
+        if (_consecutiveFailures == 1) {
+          // Chờ đủ lâu sau lỗi đầu tiên để không "hammer" ESP32/WiFi.
+          _backoffMultiplier = 1;
+          _currentDelay = widget.maxDelayMs;
+        } else if (_consecutiveFailures >= 2) {
           _backoffMultiplier = (_backoffMultiplier * 2).clamp(1, 8);
           _currentDelay = (widget.minDelayMs * _backoffMultiplier).clamp(widget.minDelayMs, widget.maxDelayMs);
         }

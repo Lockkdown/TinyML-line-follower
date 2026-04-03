@@ -65,7 +65,8 @@ class ZoneOverlayPainter extends CustomPainter {
     labelPaint.layout();
     labelPaint.paint(
       canvas,
-      Offset((leftX + rightX) / 2 - labelPaint.width / 2, size.height / 2 - labelPaint.height / 2),
+      Offset((rightX + size.width) / 2 - labelPaint.width / 2,
+          size.height / 2 - labelPaint.height / 2),
     );
   }
   

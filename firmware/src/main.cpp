@@ -4,15 +4,14 @@
 #include "wifi_config.h"
 #include "wifi_controller.h"
 #include "inference.h"
+#include "robot_mode.h"
 
 void setup() {
     Serial.begin(115200);
     delay(1000); // Đợi Serial ổn định
     Serial.printf("\n[System] PSRAM Size: %d bytes\n", ESP.getPsramSize());
     
-    if (!initCamera()) {
-        Serial.println("[Camera] Skipping — web UI still available");
-    }
+    setRobotMode(MODE_CONTROL);
     connectWiFi(WIFI_SSID, WIFI_PASSWORD);
     startWebServer();
     initMotor();

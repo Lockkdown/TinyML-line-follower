@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'zone_overlay_painter.dart';
+
 class DatasetPreview extends StatelessWidget {
   final Uint8List? frame;
   final int captured;
@@ -32,6 +34,11 @@ class DatasetPreview extends StatelessWidget {
       child: Stack(
         children: [
           Positioned.fill(child: _buildFrame()),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: ZoneOverlayPainter()),
+            ),
+          ),
           Positioned(
             left: 8,
             right: 8,

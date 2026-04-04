@@ -1,6 +1,10 @@
 #pragma once
 
 #include <esp_camera.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
+extern SemaphoreHandle_t g_camera_mutex;
 
 // Camera GPIO constants — GOOUUU ESP32-S3-CAM (matches codebase-context.md §8)
 constexpr int PWDN_GPIO_NUM  = -1;
@@ -23,11 +27,14 @@ constexpr int VSYNC_GPIO_NUM = 6;
 constexpr int HREF_GPIO_NUM  = 7;
 constexpr int PCLK_GPIO_NUM  = 13;
 
-constexpr int XCLK_FREQ_HZ = 20000000;
-constexpr int STREAM_QUALITY_DEFAULT = 12;
+// 24 MHz gives OV2640 more headroom for higher frame rate at QQVGA.
+constexpr int XCLK_FREQ_HZ = 24000000;
+// 20 = smaller JPEG → faster WiFi transfer; app sets final quality via /camera-config.
+constexpr int STREAM_QUALITY_DEFAULT = 20;
 
 bool initCamera();
-bool initCameraForInference();
 bool deinitCamera();
 bool captureFrame(camera_fb_t** frame_buffer);
 void setStreamQuality(int quality);
+bool setCameraModeCNN();
+bool setCameraModeStream();

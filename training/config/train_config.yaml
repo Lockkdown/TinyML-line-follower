@@ -8,5 +8,7 @@ learning_rate: 0.001
 validation_split: 0.15
 test_split: 0.15
 use_augmentation: true
+# PNG previews per class under dataset/processed/<class>/ (tools/preview_augmented_samples.py)
+preview_samples_per_class: 6
 dropout: 0.5
 l2_reg: 0.0001

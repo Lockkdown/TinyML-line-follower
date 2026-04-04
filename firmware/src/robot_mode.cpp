@@ -1,7 +1,12 @@
+// file: firmware/src/robot_mode.cpp
+// purpose: manage robot operating modes and CNN inference loop
+// dependencies: camera.h, controller.h, inference.h, motor.h, wifi_controller.h
+
 #include "robot_mode.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -9,99 +14,147 @@
 #include "controller.h"
 #include "inference.h"
 #include "motor.h"
+#include "wifi_controller.h"
 
 static RobotMode g_robotMode = MODE_CONTROL;
 static TaskHandle_t g_cnnTaskHandle = nullptr;
 static volatile bool g_cnnLoopActive = false;
-static int g_classHistory[CNN_MOMENTUM_FRAMES] = {3, 3, 3};
-static int g_historyIndex = 0;
-static bool g_coastPendingStop = false;
-
-static void pushHistoryClass(int classIndex) {
-    g_classHistory[g_historyIndex] = classIndex;
-    g_historyIndex = (g_historyIndex + 1) % CNN_MOMENTUM_FRAMES;
-}
-
-static int getMomentumTurnClass() {
-    int leftCount = 0;
-    int rightCount = 0;
-    for (int i = 0; i < CNN_MOMENTUM_FRAMES; ++i) {
-        if (g_classHistory[i] == 1) {
-            ++leftCount;
-        } else if (g_classHistory[i] == 2) {
-            ++rightCount;
-        }
-    }
-
-    int requiredVotes = (CNN_MOMENTUM_FRAMES / 2) + 1;
-    if (leftCount >= requiredVotes) {
-        return 1;
-    }
-    if (rightCount >= requiredVotes) {
-        return 2;
-    }
-    return 3;
-}
 
 static void stopCnnLoop() {
     g_cnnLoopActive = false;
 }
 
-static void cnnLoopTask(void* param) {
-    while (g_cnnLoopActive) {
-        const uint32_t start_time = millis();
-        int cls = runInference();
-        float confidence = getLastConfidence();
+static void applyHysteresis(int cls, float conf, int* prev_class, int* hold_count) {
+    static int lost_line_counter = 0;
+    static int recovery_active_counter = 0;
+    static int grace_period_counter = 0;
 
-        int actionClass = cls;
-        if (actionClass < 0 || actionClass > 3) {
-            actionClass = 3;
+    // Handle Grace Period after finding a line
+    if (grace_period_counter > 0) {
+        grace_period_counter--;
+        if (cls == 3) {
+            // Ignore noise immediately after finding a line
+            cls = *prev_class;
         }
+    }
 
-        if (confidence < CNN_CONFIDENCE_THRESHOLD) {
-            if (actionClass == 3) {
-                actionClass = getMomentumTurnClass();
-            } else {
-                actionClass = g_classHistory[(g_historyIndex + CNN_MOMENTUM_FRAMES - 1) % CNN_MOMENTUM_FRAMES];
-            }
-        }
-
-        pushHistoryClass(actionClass);
-
-        if (actionClass == 3) {
-            if (g_coastPendingStop) {
-                setMotor(0, 0);
-                g_coastPendingStop = false;
-            } else {
-                classToAction(3);
-                g_coastPendingStop = true;
-            }
+    // Asymmetric Hysteresis Logic
+    if (cls == 3) {
+        // Potential line loss detected
+        lost_line_counter++;
+        if (lost_line_counter < RECOVERY_HOLD_FRAMES) {
+            // Not enough frames to confirm line loss. 
+            // Coasting: pretend we still see the last known good class.
+            cls = *prev_class;
+            Serial.printf("[HYST] Ignoring noise cls=3 (lost %d/%d), coasting as cls=%d\n", 
+                          lost_line_counter, RECOVERY_HOLD_FRAMES, cls);
         } else {
-            g_coastPendingStop = false;
-            classToAction(actionClass);
+            // Confirmed line loss. Trigger recovery.
+            lost_line_counter = RECOVERY_HOLD_FRAMES; // Cap to prevent overflow
+            recovery_active_counter++;
+            
+            if (recovery_active_counter > RECOVERY_TIMEOUT_FRAMES) {
+                // We've been spinning/backing up too long. Give up and stop.
+                Serial.printf("[HYST] RECOVERY TIMEOUT (%d frames). Stopping motors.\n", recovery_active_counter);
+                setMotor(0, 0);
+                return; // Skip classToAction
+            }
         }
-        const uint32_t end_time = millis();
-        Serial.printf("[CNN] Time: %lu ms | Class: %d | Action: %d | Conf: %.3f\n",
-            end_time - start_time, cls, actionClass, confidence);
-        vTaskDelay(pdMS_TO_TICKS(10));
+    } else {
+        // Line detected (0, 1, or 2). Reset counters.
+        if (recovery_active_counter > 0) {
+            // We just recovered! Start grace period.
+            grace_period_counter = RECOVERY_GRACE_FRAMES;
+            Serial.printf("[HYST] Line found! Starting grace period (%d frames).\n", RECOVERY_GRACE_FRAMES);
+        }
+        lost_line_counter = 0;
+        recovery_active_counter = 0;
+    }
+
+    // Standard Hysteresis for normal steering (0, 1, 2) and confirmed recovery (3)
+    if (cls == *prev_class) {
+        *hold_count = 0;
+        classToAction(cls, conf);
+    } else {
+        (*hold_count)++;
+        // Log when suppressing a turn command — critical for diagnosing 90° overshoot.
+        // forward=0, left=1, right=2; prev_class=0 means was going straight.
+        const bool suppressingTurn = (cls == 1 || cls == 2) && (*prev_class == 0);
+        if (suppressingTurn) {
+            Serial.printf("[HYST] HOLDING turn cls=%d (hold %d/%d) acting on prev=%d\n",
+                          cls, *hold_count, HOLD_FRAMES, *prev_class);
+        }
+        if (*hold_count >= HOLD_FRAMES) {
+            *prev_class = cls;
+            *hold_count = 0;
+        }
+        classToAction(*prev_class, conf);
+    }
+}
+
+static void cnnLoopTask(void* param) {
+    int prev_class = 3;
+    int hold_count = 0;
+    int frame_count = 0;
+
+    while (g_cnnLoopActive) {
+        const uint64_t loop_t0 = esp_timer_get_time();
+        Serial.println("[CNN] loop tick");
+        const int raw_cls = runInference();
+        const float conf = getLastConfidence();
+        int cls = raw_cls;
+        if (cls < 0 || cls > 3) {
+            cls = 3;
+        }
+
+        applyHysteresis(cls, conf, &prev_class, &hold_count);
+
+        frame_count++;
+        digitalWrite(CNN_INDICATOR_LED, frame_count % 2);
+
+        if (CNN_LOG_PREDICTION_EVERY_FRAMES > 0 &&
+            (frame_count % CNN_LOG_PREDICTION_EVERY_FRAMES) == 0) {
+            const InferenceTimings& tm = getLastInferenceTimings();
+            const uint64_t loop_us = esp_timer_get_time() - loop_t0;
+            const float loop_fps =
+                (loop_us > 0) ? (1e6f / (float)loop_us) : 0.0f;
+            Serial.printf(
+                "[CNN] class=%d conf=%.2f hold_cls=%d | CAM:%llu PREP:%llu INF:%llu us | "
+                "pipe_fps:%.1f loop_us:%llu loop_fps:%.1f\n",
+                cls,
+                conf,
+                prev_class,
+                (unsigned long long)tm.cam_us,
+                (unsigned long long)tm.prep_us,
+                (unsigned long long)tm.inf_us,
+                g_cnn_stats.fps,
+                (unsigned long long)loop_us,
+                loop_fps);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     g_cnnTaskHandle = nullptr;
     vTaskDelete(nullptr);
 }
 
-static void startCnnLoop() {
+static bool startCnnLoop() {
     if (g_cnnTaskHandle != nullptr) {
-        return;
+        return true;
     }
-
+    pinMode(CNN_INDICATOR_LED, OUTPUT);
     g_cnnLoopActive = true;
-    g_historyIndex = 0;
-    for (int i = 0; i < CNN_MOMENTUM_FRAMES; ++i) {
-        g_classHistory[i] = 3;
+    constexpr int kCnnTaskPriority = 6;
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        cnnLoopTask, "CNN Loop", 16384, nullptr, kCnnTaskPriority, &g_cnnTaskHandle, 1);
+    if (created != pdPASS) {
+        g_cnnLoopActive = false;
+        g_cnnTaskHandle = nullptr;
+        Serial.println("[Mode] CNN task create failed");
+        return false;
     }
-    g_coastPendingStop = false;
-    xTaskCreatePinnedToCore(cnnLoopTask, "CNN Loop", 16384, nullptr, 1, &g_cnnTaskHandle, 1);
+    return true;
 }
 
 void setRobotMode(RobotMode mode) {
@@ -114,8 +167,14 @@ void setRobotMode(RobotMode mode) {
     }
 
     if (mode == MODE_CONTROL) {
+        const bool comingFromCnn = (g_robotMode == MODE_CNN);
         setMotor(0, 0);
-        deinitCamera();
+        if (comingFromCnn) {
+            setCameraModeStream();
+            reconnectWiFiAfterCnn();
+        } else {
+            deinitCamera();
+        }
         g_robotMode = MODE_CONTROL;
         return;
     }
@@ -130,15 +189,28 @@ void setRobotMode(RobotMode mode) {
     }
 
     if (mode == MODE_CNN) {
-        if (!initCameraForInference()) {
+        if (!initCamera()) {
             Serial.println("[Mode] Failed to init camera for CNN mode");
             return;
         }
-
+        // Tắt WiFi trước khi đổi mode camera để /snapshot không giữ mutex tranh với setCameraModeCNN.
         initMotor();
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
-        startCnnLoop();
+        delay(150);
+
+        if (!setCameraModeCNN()) {
+            Serial.println("[Mode] Failed to set camera to CNN mode — restoring WiFi");
+            reconnectWiFiAfterCnn();
+            return;
+        }
+        if (!startCnnLoop()) {
+            Serial.println("[Mode] CNN loop start failed — restoring WiFi");
+            setCameraModeStream();
+            reconnectWiFiAfterCnn();
+            return;
+        }
+        Serial.println("[Mode] CNN running — WiFi off; USB Serial shows [CNN] predictions");
         g_robotMode = MODE_CNN;
     }
 }

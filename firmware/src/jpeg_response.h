@@ -21,7 +21,6 @@ public:
             if (!_buf) {
                 _buf = static_cast<uint8_t*>(ps_malloc(fb->len));
             }
-            
             if (_buf) {
                 memcpy(_buf, fb->buf, fb->len);
                 _len = fb->len;
@@ -34,9 +33,7 @@ public:
         }
     }
     ~AsyncJpegCopyResponse() {
-        if (_buf) {
-            free(_buf);
-        }
+        if (_buf) free(_buf);
     }
     bool _sourceValid() const override {
         return _buf != nullptr;
@@ -79,7 +76,7 @@ public:
         _contentLength = len;
     }
     ~HeapJpegResponse() {
-        if (_buf) free(_buf); // Tự động dọn RAM khi gửi xong
+        if (_buf) free(_buf);
     }
     bool _sourceValid() const override {
         return _buf != nullptr;

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -22,68 +23,66 @@ static void pushHistoryClass(int classIndex) {
     g_historyIndex = (g_historyIndex + 1) % CNN_MOMENTUM_FRAMES;
 }
 
-static int getMomentumTurnClass() {
-    int leftCount = 0;
-    int rightCount = 0;
+// Returns the class with >= 2 votes out of 3; falls back to `fallback` if no majority.
+static int getMajorityClass(int fallback) {
+    int counts[4] = {0, 0, 0, 0};
     for (int i = 0; i < CNN_MOMENTUM_FRAMES; ++i) {
-        if (g_classHistory[i] == 1) {
-            ++leftCount;
-        } else if (g_classHistory[i] == 2) {
-            ++rightCount;
-        }
+        counts[g_classHistory[i]]++;
     }
-
-    int requiredVotes = (CNN_MOMENTUM_FRAMES / 2) + 1;
-    if (leftCount >= requiredVotes) {
-        return 1;
+    const int requiredVotes = (CNN_MOMENTUM_FRAMES / 2) + 1;
+    for (int c = 0; c < 4; ++c) {
+        if (counts[c] >= requiredVotes) return c;
     }
-    if (rightCount >= requiredVotes) {
-        return 2;
-    }
-    return 3;
+    return fallback;
 }
 
 static void stopCnnLoop() {
     g_cnnLoopActive = false;
 }
 
+static void applyAction(int actionClass) {
+    if (actionClass == 3) {
+        if (g_coastPendingStop) {
+            setMotor(0, 0);
+            g_coastPendingStop = false;
+        } else {
+            classToAction(3);
+            g_coastPendingStop = true;
+        }
+    } else {
+        g_coastPendingStop = false;
+        classToAction(actionClass);
+    }
+}
+
 static void cnnLoopTask(void* param) {
+    int lastActionClass = 3;
+
     while (g_cnnLoopActive) {
-        const uint32_t start_time = millis();
+        const uint64_t t_start = esp_timer_get_time();
+
         int cls = runInference();
+        const InferenceTimings& timings = getLastInferenceTimings();
         float confidence = getLastConfidence();
 
-        int actionClass = cls;
-        if (actionClass < 0 || actionClass > 3) {
-            actionClass = 3;
-        }
+        if (cls < 0 || cls > 3) cls = 3;
 
-        if (confidence < CNN_CONFIDENCE_THRESHOLD) {
-            if (actionClass == 3) {
-                actionClass = getMomentumTurnClass();
-            } else {
-                actionClass = g_classHistory[(g_historyIndex + CNN_MOMENTUM_FRAMES - 1) % CNN_MOMENTUM_FRAMES];
-            }
-        }
+        // Low-confidence: hold last command rather than trusting raw prediction
+        int candidate = (confidence >= CNN_CONFIDENCE_THRESHOLD) ? cls : lastActionClass;
+        pushHistoryClass(candidate);
 
-        pushHistoryClass(actionClass);
+        int actionClass = getMajorityClass(lastActionClass);
+        lastActionClass = actionClass;
 
-        if (actionClass == 3) {
-            if (g_coastPendingStop) {
-                setMotor(0, 0);
-                g_coastPendingStop = false;
-            } else {
-                classToAction(3);
-                g_coastPendingStop = true;
-            }
-        } else {
-            g_coastPendingStop = false;
-            classToAction(actionClass);
-        }
-        const uint32_t end_time = millis();
-        Serial.printf("[CNN] Time: %lu ms | Class: %d | Action: %d | Conf: %.3f\n",
-            end_time - start_time, cls, actionClass, confidence);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        const uint64_t t5_start = esp_timer_get_time();
+        applyAction(actionClass);
+        const uint64_t act_us = esp_timer_get_time() - t5_start;
+        const uint64_t total_us = esp_timer_get_time() - t_start;
+
+        Serial.printf("CAM:%llu PREP:%llu INF:%llu ACT:%llu TOTAL:%llu us\n",
+            timings.cam_us, timings.prep_us, timings.inf_us, act_us, total_us);
+
+        taskYIELD();
     }
 
     g_cnnTaskHandle = nullptr;
@@ -130,6 +129,7 @@ void setRobotMode(RobotMode mode) {
     }
 
     if (mode == MODE_CNN) {
+        deinitCamera();
         if (!initCameraForInference()) {
             Serial.println("[Mode] Failed to init camera for CNN mode");
             return;

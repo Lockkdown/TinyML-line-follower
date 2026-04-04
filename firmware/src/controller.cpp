@@ -27,7 +27,6 @@ void classToAction(int classIndex) {
 
     const int base = g_cnn_base_speed;
     const int coast = (base / 2 > CNN_SPEED_COAST) ? base / 2 : CNN_SPEED_COAST;
-    Serial.printf("[CTRL] classToAction(%d) | base=%d | coast=%d\n", classIndex, base, coast);
 
     switch (classIndex) {
         case 0: // forward

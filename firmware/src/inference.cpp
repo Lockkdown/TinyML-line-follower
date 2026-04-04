@@ -4,8 +4,11 @@
 
 #include <Arduino.h>
 #include <esp_camera.h>
+#include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <img_converters.h>
 #include "camera.h"
+#include "inference.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/all_ops_resolver.h"
@@ -15,13 +18,33 @@
 const unsigned char* getModelData();
 unsigned int getModelDataLen();
 
-// Tensor arena sizes to try in order
-static constexpr int ARENA_SIZES[] = {60 * 1024, 90 * 1024, 120 * 1024, 150 * 1024};
-static constexpr int NUM_ARENA_SIZES = sizeof(ARENA_SIZES) / sizeof(ARENA_SIZES[0]);
+static constexpr int TENSOR_ARENA_SIZE = 150 * 1024;
+static constexpr size_t TENSOR_ARENA_ALIGN = 16;
 
-// Global objects
+// PSRAM via heap (EXT_RAM_BSS_ATTR often undefined in Arduino-ESP32 unless BSS-in-PSRAM enabled)
 static uint8_t* tensor_arena = nullptr;
-static int g_tensorArenaSize = 0;
+static uint8_t* tensor_arena_alloc = nullptr;
+
+static bool ensureTensorArena() {
+    if (tensor_arena != nullptr) {
+        return true;
+    }
+    const size_t total = TENSOR_ARENA_SIZE + TENSOR_ARENA_ALIGN;
+    uint8_t* raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (raw == nullptr) {
+        raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (raw == nullptr) {
+        return false;
+    }
+    tensor_arena_alloc = raw;
+    const uintptr_t aligned =
+        ((uintptr_t)raw + TENSOR_ARENA_ALIGN - 1) & ~((uintptr_t)TENSOR_ARENA_ALIGN - 1);
+    tensor_arena = (uint8_t*)aligned;
+    memset(tensor_arena, 0, TENSOR_ARENA_SIZE);
+    return true;
+}
+
 static tflite::MicroInterpreter* interpreter = nullptr;
 static TfLiteTensor* input_tensor = nullptr;
 static TfLiteTensor* output_tensor = nullptr;
@@ -29,6 +52,7 @@ static TfLiteTensor* output_tensor = nullptr;
 // Last inference result
 static int lastClass = -1;
 static float lastConfidence = 0.0f;
+static InferenceTimings lastTimings = {};
 static uint8_t* jpegRgbBuffer = nullptr;
 static size_t jpegRgbBufferSize = 0;
 
@@ -59,145 +83,98 @@ static bool ensureJpegRgbBuffer(size_t requiredSize) {
     return true;
 }
 
-bool initInference() {
-    Serial.println("[INFERENCE] initInference() start");
-    if (!hasModelData()) {
-        Serial.println("[INFERENCE] FAILED: model data not available");
-        return false;
-    }
-    Serial.println("[INFERENCE] Model data OK");
-
-    // Map model
-    Serial.println("[INFERENCE] Mapping model...");
-    const unsigned char* modelData = getModelData();
-    Serial.printf("[INFERENCE] Model data pointer: %p\n", modelData);
-    
-    // Validate model data pointer
+static bool validateModelData(const unsigned char* modelData) {
     if (!modelData || ((uintptr_t)modelData & 0x3) != 0) {
-        Serial.println("[INFERENCE] FAILED: model data pointer is null or not 4-byte aligned");
+        Serial.println("[INFERENCE] FAILED: model data null or misaligned");
         return false;
     }
-    
-    // Check model data length
-    unsigned int modelLen = getModelDataLen();
-    Serial.printf("[INFERENCE] Model data length: %u bytes\n", modelLen);
-    if (modelLen < 4) {
+    if (getModelDataLen() < 4) {
         Serial.println("[INFERENCE] FAILED: model data too small");
         return false;
     }
-    
-    // Check flatbuffer magic number (starts at byte 4)
     char magic[5] = {0};
     for (int i = 0; i < 4; i++) magic[i] = (char)modelData[4 + i];
-    Serial.printf("[INFERENCE] Flatbuffer magic: %s\n", magic);
     if (strcmp(magic, "TFL3") != 0) {
-        Serial.println("[INFERENCE] FAILED: invalid flatbuffer magic number (expected TFL3)");
+        Serial.printf("[INFERENCE] FAILED: bad magic '%s' (expected TFL3)\n", magic);
         return false;
     }
-    
+    return true;
+}
+
+static bool validateTensors() {
+    input_tensor = interpreter->input(0);
+    if (!input_tensor ||
+        input_tensor->dims->size != 4 ||
+        input_tensor->dims->data[1] != 96 ||
+        input_tensor->dims->data[2] != 96 ||
+        input_tensor->dims->data[3] != 1 ||
+        input_tensor->type != kTfLiteInt8) {
+        Serial.println("[INFERENCE] FAILED: input must be (1,96,96,1) int8");
+        return false;
+    }
+    output_tensor = interpreter->output(0);
+    if (!output_tensor ||
+        output_tensor->dims->size != 2 ||
+        output_tensor->dims->data[1] != 4 ||
+        output_tensor->type != kTfLiteInt8) {
+        Serial.println("[INFERENCE] FAILED: output must be (1,4) int8");
+        return false;
+    }
+    Serial.printf("[INFERENCE] Input quant: scale=%.6f zero_point=%d\n",
+        input_tensor->params.scale, input_tensor->params.zero_point);
+    Serial.printf("[INFERENCE] Arena used: %u bytes\n",
+        (unsigned)interpreter->arena_used_bytes());
+    return true;
+}
+
+bool initInference() {
+    Serial.println("[INFERENCE] initInference() start");
+    if (!hasModelData()) {
+        Serial.println("[INFERENCE] FAILED: no model data");
+        return false;
+    }
+    if (!ensureTensorArena()) {
+        Serial.println("[INFERENCE] FAILED: tensor arena allocation");
+        return false;
+    }
+
+    const unsigned char* modelData = getModelData();
+    if (!validateModelData(modelData)) return false;
+
     const tflite::Model* model = tflite::GetModel(modelData);
-    if (!model) {
-        Serial.println("[INFERENCE] FAILED: GetModel returned null");
-        return false;
-    }
-    Serial.printf("[INFERENCE] Model mapped, version %d\n", model->version());
-    if (model->version() != TFLITE_SCHEMA_VERSION) {
-        Serial.printf("[INFERENCE] FAILED: model schema version %d != %d\n",
-                     model->version(), TFLITE_SCHEMA_VERSION);
+    if (!model || model->version() != TFLITE_SCHEMA_VERSION) {
+        Serial.printf("[INFERENCE] FAILED: model version mismatch (%d vs %d)\n",
+            model ? model->version() : -1, TFLITE_SCHEMA_VERSION);
         return false;
     }
 
-    // Create op resolver
-    Serial.println("[INFERENCE] Creating op resolver...");
     static tflite::AllOpsResolver resolver;
-    Serial.println("[INFERENCE] Op resolver OK");
-
-    // Try each arena size
-    Serial.println("[INFERENCE] Creating interpreter...");
     static tflite::MicroErrorReporter micro_error_reporter;
     tflite::ErrorReporter* error_reporter = &micro_error_reporter;
 
-    for (int i = 0; i < NUM_ARENA_SIZES; ++i) {
-        Serial.printf("[INFERENCE] Trying arena size %d KB...\n", ARENA_SIZES[i] / 1024);
-
-        if (tensor_arena != nullptr) {
-            heap_caps_free(tensor_arena);
-            tensor_arena = nullptr;
-        }
-        if (interpreter != nullptr) {
-            delete interpreter;
-            interpreter = nullptr;
-        }
-
-        tensor_arena = (uint8_t*)heap_caps_malloc(ARENA_SIZES[i], MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (!tensor_arena) {
-            tensor_arena = (uint8_t*)heap_caps_malloc(ARENA_SIZES[i], MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
-        if (!tensor_arena) {
-            Serial.printf("[INFERENCE] arena %d KB allocation failed\n", ARENA_SIZES[i] / 1024);
-            continue;
-        }
-        memset(tensor_arena, 0, ARENA_SIZES[i]);
-
-        interpreter = new tflite::MicroInterpreter(
-            model, resolver, tensor_arena, ARENA_SIZES[i], error_reporter);
-            
-        Serial.println("[INFERENCE] Interpreter created, allocating tensors...");
-
-        TfLiteStatus allocate_status = interpreter->AllocateTensors();
-        if (allocate_status != kTfLiteOk) {
-            Serial.printf("[INFERENCE] arena %d KB failed allocation\n", ARENA_SIZES[i] / 1024);
-            continue;
-        }
-        Serial.printf("[INFERENCE] Tensors allocated with arena %d KB\n", ARENA_SIZES[i] / 1024);
-
-        // Verify input shape and type
-        Serial.println("[INFERENCE] Checking input tensor...");
-        input_tensor = interpreter->input(0);
-        if (!input_tensor) {
-            Serial.println("[INFERENCE] FAILED: input tensor is null");
-            continue;
-        }
-        Serial.printf("[INFERENCE] Input dims: %d, type: %d\n", input_tensor->dims->size, input_tensor->type);
-        if (input_tensor->dims->size != 4 ||
-            input_tensor->dims->data[0] != 1 ||
-            input_tensor->dims->data[1] != 96 ||
-            input_tensor->dims->data[2] != 96 ||
-            input_tensor->dims->data[3] != 1 ||
-            input_tensor->type != kTfLiteInt8) {
-            Serial.println("[INFERENCE] FAILED: input must be (1,96,96,1) int8");
-            continue;
-        }
-
-        // Verify output shape
-        Serial.println("[INFERENCE] Checking output tensor...");
-        output_tensor = interpreter->output(0);
-        if (!output_tensor) {
-            Serial.println("[INFERENCE] FAILED: output tensor is null");
-            continue;
-        }
-        Serial.printf("[INFERENCE] Output dims: %d, type: %d\n", output_tensor->dims->size, output_tensor->type);
-        if (output_tensor->dims->size != 2 ||
-            output_tensor->dims->data[0] != 1 ||
-            output_tensor->dims->data[1] != 4 ||
-            output_tensor->type != kTfLiteInt8) {
-            Serial.println("[INFERENCE] FAILED: output must be (1,4) int8");
-            continue;
-        }
-
-        Serial.printf("[INFERENCE] OK with arena %d KB\n", ARENA_SIZES[i] / 1024);
-        g_tensorArenaSize = ARENA_SIZES[i];
-        Serial.printf("[INFERENCE] Arena final size: %d bytes\n", g_tensorArenaSize);
-        Serial.println("[INFERENCE] initInference() SUCCESS");
-        return true;
+    if (interpreter != nullptr) {
+        delete interpreter;
+        interpreter = nullptr;
     }
 
-    Serial.println("[INFERENCE] FAILED: all arena sizes failed");
-    heap_caps_free(tensor_arena);
-    tensor_arena = nullptr;
-    g_tensorArenaSize = 0;
-    interpreter = nullptr;
-    return false;
+    interpreter = new tflite::MicroInterpreter(
+        model, resolver, tensor_arena, TENSOR_ARENA_SIZE, error_reporter);
+
+    if (interpreter->AllocateTensors() != kTfLiteOk) {
+        Serial.println("[INFERENCE] FAILED: AllocateTensors");
+        delete interpreter;
+        interpreter = nullptr;
+        return false;
+    }
+
+    if (!validateTensors()) {
+        delete interpreter;
+        interpreter = nullptr;
+        return false;
+    }
+
+    Serial.println("[INFERENCE] initInference() SUCCESS");
+    return true;
 }
 
 int runInference() {
@@ -206,6 +183,8 @@ int runInference() {
         return -1;
     }
 
+    const uint64_t t1 = esp_timer_get_time();
+
     // Get frame from camera
     camera_fb_t* fb = nullptr;
     if (!captureFrame(&fb) || !fb || fb->len == 0) {
@@ -213,6 +192,8 @@ int runInference() {
         if (fb) esp_camera_fb_return(fb);
         return -1;
     }
+
+    const uint64_t t2 = esp_timer_get_time();
 
     // Check if frame is grayscale and 96x96
     // If not grayscale, we need to convert (simple luminance)
@@ -282,7 +263,7 @@ int runInference() {
         src = processed;
     }
 
-    // Copy and quantize to input tensor (uint8 [0,255] -> int8 [-128,127])
+    // Map uint8 [0,255] → int8 [-128,127]: matches quantization for pixel/127.5 - 1.0 normalization
     int8_t* input = input_tensor->data.int8;
     for (int i = 0; i < 96 * 96; ++i) {
         input[i] = (int8_t)(src[i] - 128);
@@ -290,12 +271,16 @@ int runInference() {
 
     esp_camera_fb_return(fb);
 
+    const uint64_t t3 = esp_timer_get_time();
+
     // Run inference
     TfLiteStatus invoke_status = interpreter->Invoke();
     if (invoke_status != kTfLiteOk) {
         Serial.println("[INFERENCE] invoke failed");
         return -1;
     }
+
+    const uint64_t t4 = esp_timer_get_time();
 
     // Get output (int8), find argmax, dequantize confidence
     int8_t* output = output_tensor->data.int8;
@@ -314,6 +299,9 @@ int runInference() {
 
     lastClass = maxIdx;
     lastConfidence = maxVal;
+    lastTimings.cam_us  = t2 - t1;
+    lastTimings.prep_us = t3 - t2;
+    lastTimings.inf_us  = t4 - t3;
 
     return maxIdx;
 }
@@ -324,4 +312,8 @@ int getLastClass() {
 
 float getLastConfidence() {
     return lastConfidence;
+}
+
+const InferenceTimings& getLastInferenceTimings() {
+    return lastTimings;
 }

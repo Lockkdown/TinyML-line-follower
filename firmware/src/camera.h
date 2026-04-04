@@ -1,6 +1,10 @@
 #pragma once
 
 #include <esp_camera.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
+extern SemaphoreHandle_t g_camera_mutex;
 
 // Camera GPIO constants — GOOUUU ESP32-S3-CAM (matches codebase-context.md §8)
 constexpr int PWDN_GPIO_NUM  = -1;
@@ -27,7 +31,8 @@ constexpr int XCLK_FREQ_HZ = 20000000;
 constexpr int STREAM_QUALITY_DEFAULT = 12;
 
 bool initCamera();
-bool initCameraForInference();
 bool deinitCamera();
 bool captureFrame(camera_fb_t** frame_buffer);
 void setStreamQuality(int quality);
+bool setCameraModeCNN();
+bool setCameraModeStream();

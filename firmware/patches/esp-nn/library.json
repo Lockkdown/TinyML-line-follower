@@ -1,0 +1,12 @@
+{
+  "name": "esp-nn",
+  "version": "1.0.0",
+  "build": {
+    "srcFilter": [
+      "+<src/**/*.c>",
+      "+<src/**/*.S>",
+      "-<src/convolution/esp_nn_conv_esp32p4.c>"
+    ],
+    "flags": ["-mlongcalls", "-O2", "-Wno-unused-function"]
+  }
+}

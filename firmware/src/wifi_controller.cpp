@@ -6,6 +6,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 #include "motor.h"
@@ -16,6 +17,7 @@
 #include "jpeg_response.h"
 #include "robot_mode.h"
 #include "controller.h"
+#include "inference.h"
 
 static AsyncWebServer server(80);
 uint8_t g_speed = 180;
@@ -200,8 +202,18 @@ static void registerRoutes() {
         });
 
     server.on("/snapshot", HTTP_GET, [](AsyncWebServerRequest* request) {
+        if (getRobotMode() == MODE_CNN) {
+            request->send(503, "text/plain", "CNN active");
+            return;
+        }
         if (getRobotMode() != MODE_DATASET) {
             request->send(503, "text/plain", "Camera OFF - switch to dataset mode");
+            return;
+        }
+
+        if (g_camera_mutex == nullptr ||
+            xSemaphoreTake(g_camera_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+            request->send(503, "text/plain", "camera busy");
             return;
         }
 
@@ -211,6 +223,7 @@ static void registerRoutes() {
             if (fb) {
                 esp_camera_fb_return(fb);
             }
+            xSemaphoreGive(g_camera_mutex);
             request->send(503, "text/plain", "frame unavailable");
             return;
         }
@@ -218,6 +231,7 @@ static void registerRoutes() {
         if (fb->format != PIXFORMAT_JPEG) {
             Serial.printf("[Camera] Wrong format: %d\n", fb->format);
             esp_camera_fb_return(fb);
+            xSemaphoreGive(g_camera_mutex);
             request->send(503, "text/plain", "wrong format");
             return;
         }
@@ -225,13 +239,15 @@ static void registerRoutes() {
         uint8_t* buf = (uint8_t*)malloc(fb->len);
         if (!buf) {
             esp_camera_fb_return(fb);
+            xSemaphoreGive(g_camera_mutex);
             request->send(503, "text/plain", "Out of memory");
             return;
         }
 
         memcpy(buf, fb->buf, fb->len);
         size_t len = fb->len;
-        esp_camera_fb_return(fb); // Giải phóng PSRAM ngay lập tức
+        esp_camera_fb_return(fb);
+        xSemaphoreGive(g_camera_mutex);
 
         HeapJpegResponse* response = new HeapJpegResponse(buf, len);
         response->addHeader("Access-Control-Allow-Origin", "*");
@@ -248,6 +264,7 @@ static void registerRoutes() {
     });
 
     server.on("/cnn/start", HTTP_POST, [](AsyncWebServerRequest* request) {
+        Serial.println("[CNN] start handler called");
         if (!g_cnnTransitionScheduled) {
             g_cnnTransitionScheduled = true;
             xTaskCreatePinnedToCore(cnnTransitionTask, "CNN Transition", 4096, nullptr, 1, nullptr, 1);
@@ -271,11 +288,29 @@ static void registerRoutes() {
     });
 
     server.on("/cnn/stop", HTTP_POST, [](AsyncWebServerRequest* request) {
+        if (getRobotMode() == MODE_CNN) {
+            setRobotMode(MODE_CONTROL);
+        }
         AsyncWebServerResponse* response = request->beginResponse(
-            409,
+            200,
             "application/json",
-            "{\"status\":\"not_supported\",\"message\":\"Reset device to exit CNN mode\"}"
+            "{\"status\":\"exited_cnn\"}"
         );
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+
+    server.on("/cnn/stats", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String json = "{";
+        json += "\"fps\":"        + String(g_cnn_stats.fps, 1)                  + ",";
+        json += "\"cam_ms\":"     + String(g_cnn_stats.cam_us  / 1000U)         + ",";
+        json += "\"prep_ms\":"    + String(g_cnn_stats.prep_us / 1000U)         + ",";
+        json += "\"inf_ms\":"     + String(g_cnn_stats.inf_us  / 1000U)         + ",";
+        json += "\"total_ms\":"   + String(g_cnn_stats.total_us / 1000U)        + ",";
+        json += "\"last_class\":" + String(g_cnn_stats.last_class)              + ",";
+        json += "\"last_conf\":"  + String(g_cnn_stats.last_conf, 2);
+        json += "}";
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
         response->addHeader("Access-Control-Allow-Origin", "*");
         request->send(response);
     });
@@ -320,4 +355,11 @@ void startWebServer() {
     registerRoutes();
     server.begin();
     Serial.println("[WebServer] Started on port 80");
+}
+
+void reconnectWiFiAfterCnn() {
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.println("[WiFi] Reconnecting after CNN session...");
 }

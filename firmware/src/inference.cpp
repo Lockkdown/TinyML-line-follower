@@ -12,34 +12,30 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 const unsigned char* getModelData();
 unsigned int getModelDataLen();
 
-static constexpr int TENSOR_ARENA_SIZE = 150 * 1024;
+// Arena sized for largest model (arena_used ~30KB measured); internal RAM first
+// for SIMD performance — PSRAM has 20-50x higher latency for random access.
+static constexpr int TENSOR_ARENA_SIZE = 96 * 1024;
 static constexpr size_t TENSOR_ARENA_ALIGN = 16;
-// ESP32-S3 OPI PSRAM mapped range (approx.) — avoids esp_memory_utils version drift
-static constexpr uintptr_t PSRAM_ADDR_MIN = 0x3C000000UL;
-static constexpr uintptr_t PSRAM_ADDR_MAX = 0x3E000000UL;
 
-static bool arena_alloc_is_psram(const void* ptr) {
-    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-    return addr >= PSRAM_ADDR_MIN && addr < PSRAM_ADDR_MAX;
-}
-
-// PSRAM via heap (EXT_RAM_BSS_ATTR often undefined in Arduino-ESP32 unless BSS-in-PSRAM enabled)
 static uint8_t* tensor_arena = nullptr;
 static uint8_t* tensor_arena_alloc = nullptr;
 
 static bool ensureTensorArena() {
     if (tensor_arena != nullptr) {
+        memset(tensor_arena, 0, TENSOR_ARENA_SIZE);
         return true;
     }
-    const size_t total = TENSOR_ARENA_SIZE + TENSOR_ARENA_ALIGN;
-    uint8_t* raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    const size_t total = (size_t)TENSOR_ARENA_SIZE + TENSOR_ARENA_ALIGN;
+    uint8_t* raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const bool in_psram = (raw == nullptr);
     if (raw == nullptr) {
-        raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (raw == nullptr) {
         return false;
@@ -49,8 +45,7 @@ static bool ensureTensorArena() {
         ((uintptr_t)raw + TENSOR_ARENA_ALIGN - 1) & ~((uintptr_t)TENSOR_ARENA_ALIGN - 1);
     tensor_arena = (uint8_t*)aligned;
     memset(tensor_arena, 0, TENSOR_ARENA_SIZE);
-    Serial.printf("[INFERENCE] Tensor arena: %s\n",
-        arena_alloc_is_psram(tensor_arena_alloc) ? "PSRAM" : "INTERNAL (slow)");
+    Serial.printf("[INFERENCE] Tensor arena: %s\n", in_psram ? "PSRAM (heap)" : "INTERNAL (heap)");
     return true;
 }
 
@@ -64,6 +59,8 @@ static float lastConfidence = 0.0f;
 static InferenceTimings lastTimings = {};
 static uint8_t* jpegRgbBuffer = nullptr;
 static size_t jpegRgbBufferSize = 0;
+
+CnnTimingStats g_cnn_stats = {};
 
 static bool hasModelData() {
     return getModelData() != nullptr && getModelDataLen() > 0;
@@ -168,7 +165,6 @@ bool initInference() {
         Serial.println("[INFERENCE] FAILED: tensor arena allocation");
         return false;
     }
-
     const unsigned char* modelData = getModelData();
     if (!validateModelData(modelData)) return false;
 
@@ -181,8 +177,6 @@ bool initInference() {
 
     static tflite::MicroMutableOpResolver<24> resolver;
     static bool resolver_ready = false;
-    static tflite::MicroErrorReporter micro_error_reporter;
-    tflite::ErrorReporter* error_reporter = &micro_error_reporter;
 
     if (!resolver_ready) {
         if (registerLineFollowerOps(resolver) != kTfLiteOk) {
@@ -198,10 +192,10 @@ bool initInference() {
     }
 
     interpreter = new tflite::MicroInterpreter(
-        model, resolver, tensor_arena, TENSOR_ARENA_SIZE, error_reporter);
+        model, resolver, tensor_arena, TENSOR_ARENA_SIZE);
 
     if (interpreter->AllocateTensors() != kTfLiteOk) {
-        Serial.println("[INFERENCE] FAILED: AllocateTensors");
+        Serial.println("[INFERENCE] FATAL: AllocateTensors failed");
         delete interpreter;
         interpreter = nullptr;
         return false;
@@ -217,32 +211,45 @@ bool initInference() {
     return true;
 }
 
+static void giveCameraLockIfHeld(bool held) {
+    if (held && g_camera_mutex != nullptr) {
+        xSemaphoreGive(g_camera_mutex);
+    }
+}
+
 int runInference() {
     if (!interpreter || !input_tensor || !output_tensor) {
         Serial.println("[INFERENCE] not initialized");
         return -1;
     }
 
+    bool cam_lock_held = false;
+    if (g_camera_mutex != nullptr) {
+        if (xSemaphoreTake(g_camera_mutex, pdMS_TO_TICKS(30)) != pdTRUE) {
+            return -1;
+        }
+        cam_lock_held = true;
+    }
+
     const uint64_t t1 = esp_timer_get_time();
 
-    // Get frame from camera
     camera_fb_t* fb = nullptr;
     if (!captureFrame(&fb) || !fb || fb->len == 0) {
         Serial.println("[INFERENCE] failed to get frame");
-        if (fb) esp_camera_fb_return(fb);
+        if (fb) {
+            esp_camera_fb_return(fb);
+        }
+        giveCameraLockIfHeld(cam_lock_held);
         return -1;
     }
+    Serial.printf("[CNN] fb size=%d\n", fb->len);
 
     const uint64_t t2 = esp_timer_get_time();
 
-    // Check if frame is grayscale and 96x96
-    // If not grayscale, we need to convert (simple luminance)
-    // If not 96x96, we need to downsample (nearest neighbor)
     bool isFastPathGrayscale96 = (fb->width == 96 && fb->height == 96 && fb->format == PIXFORMAT_GRAYSCALE);
     bool needResize = (fb->width != 96 || fb->height != 96);
     bool needGrayscale = (fb->format != PIXFORMAT_GRAYSCALE);
 
-    // Temporary buffer for processed image
     static uint8_t processed[96 * 96];
     uint8_t* src = (uint8_t*)fb->buf;
     uint8_t* jpegRgb = nullptr;
@@ -255,27 +262,26 @@ int runInference() {
             if (!ensureJpegRgbBuffer(requiredSize)) {
                 Serial.println("[INFERENCE] failed to allocate JPEG decode buffer");
                 esp_camera_fb_return(fb);
+                giveCameraLockIfHeld(cam_lock_held);
                 return -1;
             }
             if (!fmt2rgb888(fb->buf, fb->len, fb->format, jpegRgbBuffer)) {
                 Serial.println("[INFERENCE] JPEG decode failed");
                 esp_camera_fb_return(fb);
+                giveCameraLockIfHeld(cam_lock_held);
                 return -1;
             }
             jpegRgb = jpegRgbBuffer;
         }
 
-        // Simple nearest neighbor downsampling + grayscale conversion
         for (int y = 0; y < 96; ++y) {
             for (int x = 0; x < 96; ++x) {
-                // Map to source coordinates
                 int srcX = (x * fb->width) / 96;
                 int srcY = (y * fb->height) / 96;
                 int srcIdx = srcY * fb->width + srcX;
 
                 uint8_t gray;
                 if (needGrayscale && fb->format == PIXFORMAT_RGB565) {
-                    // Convert RGB565 to grayscale
                     uint16_t pixel = ((uint16_t*)src)[srcIdx];
                     uint8_t r5 = (pixel >> 11) & 0x1F;
                     uint8_t g6 = (pixel >> 5) & 0x3F;
@@ -285,7 +291,6 @@ int runInference() {
                     uint8_t b8 = (b5 * 255) / 31;
                     gray = (uint8_t)(0.299f * r8 + 0.587f * g8 + 0.114f * b8);
                 } else if (needGrayscale && fb->format == PIXFORMAT_YUV422) {
-                    // YUV422: Y component is first byte of each pair
                     gray = src[srcIdx * 2];
                 } else if (needGrayscale && fb->format == PIXFORMAT_JPEG) {
                     int rgbIdx = srcIdx * 3;
@@ -294,7 +299,6 @@ int runInference() {
                     uint8_t b8 = jpegRgb[rgbIdx + 2];
                     gray = (uint8_t)(0.299f * r8 + 0.587f * g8 + 0.114f * b8);
                 } else {
-                    // Already grayscale
                     gray = src[srcIdx];
                 }
                 processed[y * 96 + x] = gray;
@@ -303,13 +307,14 @@ int runInference() {
         src = processed;
     }
 
-    // Map uint8 [0,255] → int8 [-128,127]: matches quantization for pixel/127.5 - 1.0 normalization
     int8_t* input = input_tensor->data.int8;
     for (int i = 0; i < 96 * 96; ++i) {
         input[i] = (int8_t)(src[i] - 128);
     }
 
     esp_camera_fb_return(fb);
+    giveCameraLockIfHeld(cam_lock_held);
+    cam_lock_held = false;
 
     const uint64_t t3 = esp_timer_get_time();
 
@@ -337,11 +342,22 @@ int runInference() {
         }
     }
 
+    Serial.printf("[CNN] class=%d conf=%.2f\n", maxIdx, maxVal);
+
     lastClass = maxIdx;
     lastConfidence = maxVal;
     lastTimings.cam_us  = t2 - t1;
     lastTimings.prep_us = t3 - t2;
     lastTimings.inf_us  = t4 - t3;
+
+    const uint64_t total = t4 - t1;
+    g_cnn_stats.cam_us     = (uint32_t)(t2 - t1);
+    g_cnn_stats.prep_us    = (uint32_t)(t3 - t2);
+    g_cnn_stats.inf_us     = (uint32_t)(t4 - t3);
+    g_cnn_stats.total_us   = (uint32_t)total;
+    g_cnn_stats.fps        = (total > 0) ? (1e6f / (float)total) : 0.0f;
+    g_cnn_stats.last_class = maxIdx;
+    g_cnn_stats.last_conf  = maxVal;
 
     return maxIdx;
 }

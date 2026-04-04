@@ -28,6 +28,9 @@ void setup() {
     connectWiFi(WIFI_SSID, WIFI_PASSWORD);
     startWebServer();
     initMotor();
+    if (initCamera()) {
+        setCameraModeStream();
+    }
     if (!initInference()) {
         Serial.println("[MAIN] Inference init failed — CNN mode unavailable");
     }

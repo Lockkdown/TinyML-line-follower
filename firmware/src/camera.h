@@ -27,8 +27,10 @@ constexpr int VSYNC_GPIO_NUM = 6;
 constexpr int HREF_GPIO_NUM  = 7;
 constexpr int PCLK_GPIO_NUM  = 13;
 
-constexpr int XCLK_FREQ_HZ = 20000000;
-constexpr int STREAM_QUALITY_DEFAULT = 12;
+// 24 MHz gives OV2640 more headroom for higher frame rate at QQVGA.
+constexpr int XCLK_FREQ_HZ = 24000000;
+// 20 = smaller JPEG → faster WiFi transfer; app sets final quality via /camera-config.
+constexpr int STREAM_QUALITY_DEFAULT = 20;
 
 bool initCamera();
 bool deinitCamera();

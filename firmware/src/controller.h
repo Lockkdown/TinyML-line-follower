@@ -22,6 +22,16 @@ constexpr float CONF_MAX   = 1.0f;
 constexpr int RECOVERY_SPEED_FWD  = -130; // Back up if lost while going straight (needs enough power to overcome friction)
 constexpr int RECOVERY_SPEED_TURN = 140;  // Spin in place speed if lost while turning
 
+// Number of consecutive 'nothing' frames required to trigger recovery mode.
+// Filters out noise/glitches (1 frame) while still reacting to real line loss.
+constexpr int RECOVERY_HOLD_FRAMES = 5;
+
+// Maximum frames to stay in recovery mode before giving up and stopping (e.g., 50 frames ~ 1.5s)
+constexpr int RECOVERY_TIMEOUT_FRAMES = 50;
+
+// Frames to ignore 'nothing' class immediately after finding a line, to allow the robot to stabilize
+constexpr int RECOVERY_GRACE_FRAMES = 15;
+
 // Reduced from 2 → 1: at ~38ms/frame, HOLD_FRAMES=2 adds 76ms lag before turning
 // which is enough to overshoot a 90° junction.  With HOLD_FRAMES=1 lag is ~38ms.
 constexpr int HOLD_FRAMES       = 1;

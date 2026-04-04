@@ -25,6 +25,53 @@ static void stopCnnLoop() {
 }
 
 static void applyHysteresis(int cls, float conf, int* prev_class, int* hold_count) {
+    static int lost_line_counter = 0;
+    static int recovery_active_counter = 0;
+    static int grace_period_counter = 0;
+
+    // Handle Grace Period after finding a line
+    if (grace_period_counter > 0) {
+        grace_period_counter--;
+        if (cls == 3) {
+            // Ignore noise immediately after finding a line
+            cls = *prev_class;
+        }
+    }
+
+    // Asymmetric Hysteresis Logic
+    if (cls == 3) {
+        // Potential line loss detected
+        lost_line_counter++;
+        if (lost_line_counter < RECOVERY_HOLD_FRAMES) {
+            // Not enough frames to confirm line loss. 
+            // Coasting: pretend we still see the last known good class.
+            cls = *prev_class;
+            Serial.printf("[HYST] Ignoring noise cls=3 (lost %d/%d), coasting as cls=%d\n", 
+                          lost_line_counter, RECOVERY_HOLD_FRAMES, cls);
+        } else {
+            // Confirmed line loss. Trigger recovery.
+            lost_line_counter = RECOVERY_HOLD_FRAMES; // Cap to prevent overflow
+            recovery_active_counter++;
+            
+            if (recovery_active_counter > RECOVERY_TIMEOUT_FRAMES) {
+                // We've been spinning/backing up too long. Give up and stop.
+                Serial.printf("[HYST] RECOVERY TIMEOUT (%d frames). Stopping motors.\n", recovery_active_counter);
+                setMotor(0, 0);
+                return; // Skip classToAction
+            }
+        }
+    } else {
+        // Line detected (0, 1, or 2). Reset counters.
+        if (recovery_active_counter > 0) {
+            // We just recovered! Start grace period.
+            grace_period_counter = RECOVERY_GRACE_FRAMES;
+            Serial.printf("[HYST] Line found! Starting grace period (%d frames).\n", RECOVERY_GRACE_FRAMES);
+        }
+        lost_line_counter = 0;
+        recovery_active_counter = 0;
+    }
+
+    // Standard Hysteresis for normal steering (0, 1, 2) and confirmed recovery (3)
     if (cls == *prev_class) {
         *hold_count = 0;
         classToAction(cls, conf);

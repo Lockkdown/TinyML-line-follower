@@ -79,6 +79,16 @@ class DenseCaptureService {
     start(cfg);
   }
 
+  void resetStats() {
+    _stats.captured = 0;
+    _stats.skippedFrozen = 0;
+    _stats.skippedDark = 0;
+    _stats.skippedBright = 0;
+    _stats.wifiErrors = 0;
+    _consecutiveErrors = 0;
+    _previousFrame = null;
+  }
+
   SessionStats stop() {
     _timer?.cancel();
     _previousFrame = null;
@@ -90,9 +100,11 @@ class DenseCaptureService {
     final cfg = _config;
     if (cfg == null || _busy) return;
     _busy = true;
-    final bytes = await robotService.fetchSnapshotBytes(
-      timeout: const Duration(milliseconds: 1000),
-    );
+    var bytes = await robotService.fetchSnapshotBytes();
+    if (bytes == null) {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      bytes = await robotService.fetchSnapshotBytes();
+    }
     if (bytes == null) {
       _stats.wifiErrors++;
       _consecutiveErrors++;
@@ -164,6 +176,6 @@ class DenseCaptureService {
       diff += (nowBytes[i] - oldBytes[i]).abs();
     }
     final mad = diff / (nowBytes.length / 4);
-    return mad < 5.0;
+    return mad < 1.5;
   }
 }

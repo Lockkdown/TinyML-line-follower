@@ -40,14 +40,15 @@ class RobotService {
     }
   }
 
+  /// Dataset capture uses many sequential GETs; omit Connection: close so the
+  /// client reuses the TCP socket (much faster than new handshake each frame).
   Future<Uint8List?> fetchSnapshotBytes({
-    Duration timeout = const Duration(milliseconds: 800),
+    Duration timeout = const Duration(milliseconds: 2500),
   }) async {
     try {
-      final response = await _client.get(
-        Uri.parse(getSnapshotUrl()),
-        headers: {'Connection': 'close'},
-      ).timeout(timeout);
+      final response = await _client
+          .get(Uri.parse(getSnapshotUrl()))
+          .timeout(timeout);
       if (response.statusCode == 200) return response.bodyBytes;
       return null;
     } on SocketException {

@@ -136,7 +136,7 @@ static bool validateTensors() {
     return true;
 }
 
-static TfLiteStatus registerLineFollowerOps(tflite::MicroMutableOpResolver<20>& resolver) {
+static TfLiteStatus registerLineFollowerOps(tflite::MicroMutableOpResolver<24>& resolver) {
     if (resolver.AddConv2D() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddDepthwiseConv2D() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddMaxPool2D() != kTfLiteOk) return kTfLiteError;
@@ -144,6 +144,12 @@ static TfLiteStatus registerLineFollowerOps(tflite::MicroMutableOpResolver<20>& 
     if (resolver.AddFullyConnected() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddSoftmax() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddReshape() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddShape() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddStridedSlice() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddPack() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddUnpack() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddCast() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddSqueeze() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddRelu() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddRelu6() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddQuantize() != kTfLiteOk) return kTfLiteError;
@@ -173,7 +179,7 @@ bool initInference() {
         return false;
     }
 
-    static tflite::MicroMutableOpResolver<20> resolver;
+    static tflite::MicroMutableOpResolver<24> resolver;
     static bool resolver_ready = false;
     static tflite::MicroErrorReporter micro_error_reporter;
     tflite::ErrorReporter* error_reporter = &micro_error_reporter;

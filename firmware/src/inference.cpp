@@ -11,7 +11,6 @@
 #include "inference.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 
@@ -20,6 +19,14 @@ unsigned int getModelDataLen();
 
 static constexpr int TENSOR_ARENA_SIZE = 150 * 1024;
 static constexpr size_t TENSOR_ARENA_ALIGN = 16;
+// ESP32-S3 OPI PSRAM mapped range (approx.) — avoids esp_memory_utils version drift
+static constexpr uintptr_t PSRAM_ADDR_MIN = 0x3C000000UL;
+static constexpr uintptr_t PSRAM_ADDR_MAX = 0x3E000000UL;
+
+static bool arena_alloc_is_psram(const void* ptr) {
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    return addr >= PSRAM_ADDR_MIN && addr < PSRAM_ADDR_MAX;
+}
 
 // PSRAM via heap (EXT_RAM_BSS_ATTR often undefined in Arduino-ESP32 unless BSS-in-PSRAM enabled)
 static uint8_t* tensor_arena = nullptr;
@@ -42,6 +49,8 @@ static bool ensureTensorArena() {
         ((uintptr_t)raw + TENSOR_ARENA_ALIGN - 1) & ~((uintptr_t)TENSOR_ARENA_ALIGN - 1);
     tensor_arena = (uint8_t*)aligned;
     memset(tensor_arena, 0, TENSOR_ARENA_SIZE);
+    Serial.printf("[INFERENCE] Tensor arena: %s\n",
+        arena_alloc_is_psram(tensor_arena_alloc) ? "PSRAM" : "INTERNAL (slow)");
     return true;
 }
 
@@ -127,6 +136,22 @@ static bool validateTensors() {
     return true;
 }
 
+static TfLiteStatus registerLineFollowerOps(tflite::MicroMutableOpResolver<20>& resolver) {
+    if (resolver.AddConv2D() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddDepthwiseConv2D() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddMaxPool2D() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddAveragePool2D() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddFullyConnected() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddSoftmax() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddReshape() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddRelu() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddRelu6() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddQuantize() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddDequantize() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddPad() != kTfLiteOk) return kTfLiteError;
+    return kTfLiteOk;
+}
+
 bool initInference() {
     Serial.println("[INFERENCE] initInference() start");
     if (!hasModelData()) {
@@ -148,9 +173,18 @@ bool initInference() {
         return false;
     }
 
-    static tflite::AllOpsResolver resolver;
+    static tflite::MicroMutableOpResolver<20> resolver;
+    static bool resolver_ready = false;
     static tflite::MicroErrorReporter micro_error_reporter;
     tflite::ErrorReporter* error_reporter = &micro_error_reporter;
+
+    if (!resolver_ready) {
+        if (registerLineFollowerOps(resolver) != kTfLiteOk) {
+            Serial.println("[INFERENCE] FAILED: op resolver registration");
+            return false;
+        }
+        resolver_ready = true;
+    }
 
     if (interpreter != nullptr) {
         delete interpreter;

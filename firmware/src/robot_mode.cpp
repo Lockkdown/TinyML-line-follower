@@ -16,7 +16,6 @@ static TaskHandle_t g_cnnTaskHandle = nullptr;
 static volatile bool g_cnnLoopActive = false;
 static int g_classHistory[CNN_MOMENTUM_FRAMES] = {3, 3, 3};
 static int g_historyIndex = 0;
-static bool g_coastPendingStop = false;
 
 static void pushHistoryClass(int classIndex) {
     g_classHistory[g_historyIndex] = classIndex;
@@ -41,18 +40,7 @@ static void stopCnnLoop() {
 }
 
 static void applyAction(int actionClass) {
-    if (actionClass == 3) {
-        if (g_coastPendingStop) {
-            setMotor(0, 0);
-            g_coastPendingStop = false;
-        } else {
-            classToAction(3);
-            g_coastPendingStop = true;
-        }
-    } else {
-        g_coastPendingStop = false;
-        classToAction(actionClass);
-    }
+    classToAction(actionClass);
 }
 
 static void cnnLoopTask(void* param) {
@@ -79,8 +67,8 @@ static void cnnLoopTask(void* param) {
         const uint64_t act_us = esp_timer_get_time() - t5_start;
         const uint64_t total_us = esp_timer_get_time() - t_start;
 
-        Serial.printf("CAM:%llu PREP:%llu INF:%llu ACT:%llu TOTAL:%llu us\n",
-            timings.cam_us, timings.prep_us, timings.inf_us, act_us, total_us);
+        Serial.printf("[CNN] class=%d conf=%.2f | CAM:%llu PREP:%llu INF:%llu ACT:%llu TOTAL:%llu us\n",
+            cls, confidence, timings.cam_us, timings.prep_us, timings.inf_us, act_us, total_us);
 
         taskYIELD();
     }
@@ -99,8 +87,9 @@ static void startCnnLoop() {
     for (int i = 0; i < CNN_MOMENTUM_FRAMES; ++i) {
         g_classHistory[i] = 3;
     }
-    g_coastPendingStop = false;
-    xTaskCreatePinnedToCore(cnnLoopTask, "CNN Loop", 16384, nullptr, 1, &g_cnnTaskHandle, 1);
+    constexpr int kCnnTaskPriority = 6;
+    xTaskCreatePinnedToCore(
+        cnnLoopTask, "CNN Loop", 16384, nullptr, kCnnTaskPriority, &g_cnnTaskHandle, 1);
 }
 
 void setRobotMode(RobotMode mode) {

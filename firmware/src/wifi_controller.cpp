@@ -58,6 +58,12 @@ static void wifiReconnectTask(void* param) {
     (void)param;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(5000));
+        if (getRobotMode() == MODE_CNN) {
+            continue;
+        }
+        if (WiFi.getMode() == WIFI_OFF) {
+            continue;
+        }
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("[WiFi] Disconnected — reconnecting");
             WiFi.reconnect();
@@ -306,7 +312,7 @@ void connectWiFi(const char* ssid, const char* password) {
     if (!g_wifiReconnectTaskStarted) {
         g_wifiReconnectTaskStarted = true;
         xTaskCreatePinnedToCore(
-            wifiReconnectTask, "WiFi Reconnect", 4096, nullptr, 1, nullptr, 1);
+            wifiReconnectTask, "WiFi Reconnect", 4096, nullptr, 1, nullptr, 0);
     }
 }
 

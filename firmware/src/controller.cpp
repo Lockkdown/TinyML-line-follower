@@ -26,20 +26,19 @@ void classToAction(int classIndex) {
     }
 
     const int base = g_cnn_base_speed;
-    const int coast = (base / 2 > CNN_SPEED_COAST) ? base / 2 : CNN_SPEED_COAST;
 
     switch (classIndex) {
         case 0: // forward
-            setMotorSmooth(base, base, CNN_MOTOR_RAMP_STEP);
+            setMotor(base, base);
             break;
         case 1: // left
-            setMotorSmooth(CNN_SPEED_TURN_LEFT_INNER, CNN_SPEED_TURN_LEFT_OUTER, CNN_MOTOR_RAMP_STEP);
+            setMotor(CNN_SPEED_TURN_LEFT_INNER, CNN_SPEED_TURN_LEFT_OUTER);
             break;
         case 2: // right
-            setMotorSmooth(CNN_SPEED_TURN_RIGHT_OUTER, CNN_SPEED_TURN_RIGHT_INNER, CNN_MOTOR_RAMP_STEP);
+            setMotor(CNN_SPEED_TURN_RIGHT_OUTER, CNN_SPEED_TURN_RIGHT_INNER);
             break;
         case 3: // nothing
-            setMotorSmooth(coast, coast, CNN_MOTOR_RAMP_STEP);
+            setMotor(0, 0);
             break;
         default:
             setMotor(0, 0);

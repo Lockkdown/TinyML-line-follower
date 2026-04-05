@@ -15,12 +15,19 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#ifndef TENSOR_ARENA_BYTES
+#define TENSOR_ARENA_BYTES (2 * 1024 * 1024)
+#endif
+#ifndef CNN_VERBOSE_INFERENCE_LOG
+#define CNN_VERBOSE_INFERENCE_LOG 0
+#endif
+
 const unsigned char* getModelData();
 unsigned int getModelDataLen();
 
-// Arena sized for largest model (arena_used ~30KB measured); internal RAM first
-// for SIMD performance — PSRAM has 20-50x higher latency for random access.
-static constexpr int TENSOR_ARENA_SIZE = 96 * 1024;
+// Size from platformio.ini (-DTENSOR_ARENA_BYTES). ensureTensorArena() tries internal SRAM first,
+// then PSRAM — use a smaller arena (e.g. env esp32s3-dsep) so dsep_cnn fits internal and runs fast.
+static constexpr int TENSOR_ARENA_SIZE = TENSOR_ARENA_BYTES;
 static constexpr size_t TENSOR_ARENA_ALIGN = 16;
 
 static uint8_t* tensor_arena = nullptr;
@@ -32,10 +39,12 @@ static bool ensureTensorArena() {
         return true;
     }
     const size_t total = (size_t)TENSOR_ARENA_SIZE + TENSOR_ARENA_ALIGN;
-    uint8_t* raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    const bool in_psram = (raw == nullptr);
+    uint8_t* raw =
+        (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    bool in_psram = false;
     if (raw == nullptr) {
         raw = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        in_psram = (raw != nullptr);
     }
     if (raw == nullptr) {
         return false;
@@ -133,12 +142,14 @@ static bool validateTensors() {
     return true;
 }
 
-static TfLiteStatus registerLineFollowerOps(tflite::MicroMutableOpResolver<24>& resolver) {
+static TfLiteStatus registerLineFollowerOps(tflite::MicroMutableOpResolver<32>& resolver) {
     if (resolver.AddConv2D() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddDepthwiseConv2D() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddMaxPool2D() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddAveragePool2D() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddFullyConnected() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddAdd() != kTfLiteOk) return kTfLiteError;
+    if (resolver.AddMean() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddSoftmax() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddReshape() != kTfLiteOk) return kTfLiteError;
     if (resolver.AddShape() != kTfLiteOk) return kTfLiteError;
@@ -167,6 +178,9 @@ bool initInference() {
     }
     const unsigned char* modelData = getModelData();
     if (!validateModelData(modelData)) return false;
+    Serial.printf(
+        "[INFERENCE] MODEL_DATA_LEN=%u (ref: dsep~26312, lenet~50680, resnet~334200)\n",
+        getModelDataLen());
 
     const tflite::Model* model = tflite::GetModel(modelData);
     if (!model || model->version() != TFLITE_SCHEMA_VERSION) {
@@ -175,7 +189,7 @@ bool initInference() {
         return false;
     }
 
-    static tflite::MicroMutableOpResolver<24> resolver;
+    static tflite::MicroMutableOpResolver<32> resolver;
     static bool resolver_ready = false;
 
     if (!resolver_ready) {
@@ -242,7 +256,9 @@ int runInference() {
         giveCameraLockIfHeld(cam_lock_held);
         return -1;
     }
+#if CNN_VERBOSE_INFERENCE_LOG
     Serial.printf("[CNN] fb size=%d\n", fb->len);
+#endif
 
     const uint64_t t2 = esp_timer_get_time();
 

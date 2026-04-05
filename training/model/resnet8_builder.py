@@ -5,6 +5,7 @@
 import tensorflow as tf
 
 from training.model.model_config import ModelConfig
+from training.model.sparse_ce_loss import make_sparse_categorical_loss
 
 
 def _residual_block(x: tf.Tensor, filters: int, stride: int = 1, l2_reg: float = 1e-4) -> tf.Tensor:
@@ -29,7 +30,7 @@ def _residual_block(x: tf.Tensor, filters: int, stride: int = 1, l2_reg: float =
 def build_resnet8(cfg: ModelConfig) -> tf.keras.Model:
     """
     Build ResNet-8: Input(96,96,1) → Conv → 3× residual_block → GAP → Dense(4).
-    Compile: Adam(cfg.learning_rate), sparse_categorical_crossentropy, [accuracy].
+    Compile: Adam(cfg.learning_rate), sparse CE + optional label smoothing, [accuracy].
     """
     inputs = tf.keras.Input(shape=(cfg.img_size, cfg.img_size, 1))
     x = tf.keras.layers.Conv2D(32, 3, strides=1, padding="same", kernel_regularizer=tf.keras.regularizers.l2(cfg.l2_reg))(inputs)
@@ -47,7 +48,7 @@ def build_resnet8(cfg: ModelConfig) -> tf.keras.Model:
     model = tf.keras.Model(inputs, outputs)
     model.compile(
         optimizer=tf.keras.optimizers.Adam(cfg.learning_rate),
-        loss="sparse_categorical_crossentropy",
+        loss=make_sparse_categorical_loss(cfg.label_smoothing, cfg.num_classes),
         metrics=["accuracy"],
     )
     return model

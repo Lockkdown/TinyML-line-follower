@@ -99,7 +99,6 @@ static void cnnLoopTask(void* param) {
 
     while (g_cnnLoopActive) {
         const uint64_t loop_t0 = esp_timer_get_time();
-        Serial.println("[CNN] loop tick");
         const int raw_cls = runInference();
         const float conf = getLastConfidence();
         int cls = raw_cls;

@@ -23,7 +23,11 @@ OUTPUT_EXP = ROOT_DIR / "outputs" / "experiments"
 OUTPUT_TFLITE = ROOT_DIR / "outputs" / "tflite"
 
 # Models to export
-MODEL_NAMES = ["lenet5", "mobilenet_v1_025", "mobilenet_v1_05", "mobilenet_v2_035", "resnet8"]
+MODEL_NAMES = [
+    "lenet5",
+    "dsep_cnn",
+    "resnet8",
+]
 
 
 def export_tflite(model_name: str, saved_model_path: str, output_dir: str) -> None:

@@ -2,6 +2,8 @@
 
 # Convert TFLite model to C array with proper 4-byte alignment
 # Usage: ./convert_to_cc.sh <input.tflite> <output.cc>
+#
+# Windows (no bash/WSL): python tools/convert_to_cc.py <input.tflite> <output.cc>
 
 set -e
 

@@ -1,14 +1,19 @@
-model_name: lenet5   # lenet5 | mobilenet_v1_025 | mobilenet_v1_05 | mobilenet_v2_035 | resnet8
+model_name: all_models      # lenet5 | dsep_cnn | resnet8 — mô hình chọn deploy: dsep_cnn
 img_size: 96
 num_classes: 4
 batch_size: 16
 epochs: 20
-fine_tune_epochs: 10
-learning_rate: 0.001
-validation_split: 0.15
-test_split: 0.15
+fine_tune_epochs: 20
+# EarlyStopping + ModelCheckpoint both use this min_delta on val_accuracy (aligned)
+early_stopping_patience: 5
+early_stopping_min_delta: 0.001
+learning_rate: 0.0005
+validation_split: 0.20
+test_split: 0.20
 use_augmentation: true
 # PNG previews per class under dataset/processed/<class>/ (tools/preview_augmented_samples.py)
 preview_samples_per_class: 6
-dropout: 0.5
-l2_reg: 0.0001
+dropout: 0.6
+l2_reg: 0.02
+# 0 = plain sparse CE; 0.05-0.2 thường dùng để giảm overconfidence (càng cao càng mềm nhãn)
+label_smoothing: 0.3

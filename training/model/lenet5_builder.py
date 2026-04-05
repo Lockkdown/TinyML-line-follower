@@ -5,6 +5,7 @@
 import tensorflow as tf
 
 from training.model.model_config import ModelConfig
+from training.model.sparse_ce_loss import make_sparse_categorical_loss
 
 
 def build_lenet5(cfg: ModelConfig) -> tf.keras.Model:
@@ -31,7 +32,7 @@ def build_lenet5(cfg: ModelConfig) -> tf.keras.Model:
     model = tf.keras.Model(inputs, outputs)
     model.compile(
         optimizer=tf.keras.optimizers.Adam(cfg.learning_rate),
-        loss="sparse_categorical_crossentropy",
+        loss=make_sparse_categorical_loss(cfg.label_smoothing, cfg.num_classes),
         metrics=["accuracy"],
     )
     return model

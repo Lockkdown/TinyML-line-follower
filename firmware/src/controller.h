@@ -37,8 +37,10 @@ constexpr int RECOVERY_GRACE_FRAMES = 15;
 constexpr int HOLD_FRAMES       = 1;
 constexpr int CNN_INDICATOR_LED = 48;   // GPIO48 — verify on GOOUUU ESP32-S3-CAM before flash
 
-// 1 = log mỗi frame (giống trước, nặng UART); tăng lên 5–10 nếu cần FPS cao hơn
-constexpr int CNN_LOG_PREDICTION_EVERY_FRAMES = 1;
+// 1 = mỗi frame (nặng UART). Tăng để giảm chặn serial / tải CPU nhỏ.
+constexpr int CNN_LOG_PREDICTION_EVERY_FRAMES = 5;
+
+constexpr bool CNN_VERBOSE_MOTOR_LOG = false;
 
 void classToAction(int cls, float conf);
 void setCnnBaseSpeed(int speed);

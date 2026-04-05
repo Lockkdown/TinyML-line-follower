@@ -73,6 +73,8 @@ void classToAction(int cls, float conf) {
         default:
             break;
     }
-    Serial.printf("[CNN] motor left=%d right=%d\n", left_speed, right_speed);
+    if constexpr (CNN_VERBOSE_MOTOR_LOG) {
+        Serial.printf("[CNN] motor left=%d right=%d\n", left_speed, right_speed);
+    }
     setMotor(left_speed, right_speed);
 }

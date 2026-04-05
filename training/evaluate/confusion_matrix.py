@@ -14,11 +14,14 @@ def plot_confusion_matrix(
     output_path: str
 ) -> None:
     """Plot normalized confusion matrix and save PNG to output_path."""
-    # Compute confusion matrix
     cm = confusion_matrix(y_true, y_pred)
-    
-    # Normalize by row (recall per class)
-    cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    row_sums = cm.sum(axis=1)[:, np.newaxis].astype(float)
+    cm_norm = np.divide(
+        cm.astype(float),
+        row_sums,
+        out=np.zeros_like(cm.astype(float), dtype=float),
+        where=row_sums != 0,
+    )
     
     # Create figure
     fig, ax = plt.subplots(figsize=(8, 6))

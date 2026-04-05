@@ -7,9 +7,7 @@ from dataclasses import dataclass
 
 VALID_MODEL_NAMES: tuple[str, ...] = (
     "lenet5",
-    "mobilenet_v1_025",
-    "mobilenet_v1_05",
-    "mobilenet_v2_035",
+    "dsep_cnn",
     "resnet8",
 )
 
@@ -24,6 +22,7 @@ class ModelConfig:
     l2_reg: float
     use_pretrained: bool
     learning_rate: float
+    label_smoothing: float
 
     def __post_init__(self) -> None:
         """Validate model configuration fields on instantiation."""
@@ -36,3 +35,7 @@ class ModelConfig:
             raise ValueError(f"img_size must be positive, got {self.img_size}")
         if self.num_classes <= 0:
             raise ValueError(f"num_classes must be positive, got {self.num_classes}")
+        if self.label_smoothing < 0 or self.label_smoothing >= 1:
+            raise ValueError(
+                f"label_smoothing must be in [0, 1), got {self.label_smoothing}"
+            )

@@ -8,6 +8,7 @@
 #include <esp_timer.h>
 #include <img_converters.h>
 #include "camera.h"
+#include "controller.h"
 #include "inference.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
@@ -22,11 +23,15 @@
 #define CNN_VERBOSE_INFERENCE_LOG 0
 #endif
 
+#ifdef CONFIG_ESP_NN_ANSI_C
+#warning "[INFERENCE] CONFIG_ESP_NN_ANSI_C is defined — esp-nn SIMD disabled, ~88ms expected. Add -UCONFIG_ESP_NN_ANSI_C to build_flags."
+#endif
+
 const unsigned char* getModelData();
 unsigned int getModelDataLen();
 
-// Size from platformio.ini (-DTENSOR_ARENA_BYTES). ensureTensorArena() tries internal SRAM first,
-// then PSRAM — use a smaller arena (e.g. env esp32s3-dsep) so dsep_cnn fits internal and runs fast.
+// Size from platformio.ini (-DTENSOR_ARENA_BYTES). initInference() runs after CNN camera init
+// (smaller DMA alloc first) so heap is not fragmented by arena before esp_camera_init.
 static constexpr int TENSOR_ARENA_SIZE = TENSOR_ARENA_BYTES;
 static constexpr size_t TENSOR_ARENA_ALIGN = 16;
 
@@ -39,6 +44,13 @@ static bool ensureTensorArena() {
         return true;
     }
     const size_t total = (size_t)TENSOR_ARENA_SIZE + TENSOR_ARENA_ALIGN;
+    Serial.printf(
+        "[INFERENCE] Free internal heap: %u bytes (PSRAM largest: %u) need arena alloc %u\n",
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+        (unsigned)total);
+    // Prefer INTERNAL: esp-nn + TFLite hot path stays in fast SRAM (~23ms class). PSRAM arena was ~75ms INF.
+    // dsep_cnn with first-sep stride 2 keeps arena_used ~under 110KB; if internal alloc fails, fall back to PSRAM.
     uint8_t* raw =
         (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     bool in_psram = false;
@@ -54,7 +66,8 @@ static bool ensureTensorArena() {
         ((uintptr_t)raw + TENSOR_ARENA_ALIGN - 1) & ~((uintptr_t)TENSOR_ARENA_ALIGN - 1);
     tensor_arena = (uint8_t*)aligned;
     memset(tensor_arena, 0, TENSOR_ARENA_SIZE);
-    Serial.printf("[INFERENCE] Tensor arena: %s\n", in_psram ? "PSRAM (heap)" : "INTERNAL (heap)");
+    Serial.printf("[INFERENCE] Tensor arena: %s\n",
+        in_psram ? "PSRAM (fallback, slower INF)" : "INTERNAL (preferred)");
     return true;
 }
 
@@ -179,8 +192,14 @@ bool initInference() {
     const unsigned char* modelData = getModelData();
     if (!validateModelData(modelData)) return false;
     Serial.printf(
-        "[INFERENCE] MODEL_DATA_LEN=%u (ref: dsep~26312, lenet~50680, resnet~334200)\n",
+        "[INFERENCE] MODEL_DATA_LEN=%u (ref: dsep~20568, lenet~50680)\n",
         getModelDataLen());
+    if (getModelDataLen() > 80000 && TENSOR_ARENA_SIZE < (1200 * 1024)) {
+        Serial.println("[INFERENCE] FAILED: embedded model > 80 KiB but arena < 1.2 MiB.");
+        Serial.println("  dsep_cnn is 26 KiB — re-run tools/convert_to_cc.sh to embed the correct model.");
+        Serial.println("  For large CNNs: increase TENSOR_ARENA_BYTES in platformio.ini.");
+        return false;
+    }
 
     const tflite::Model* model = tflite::GetModel(modelData);
     if (!model || model->version() != TFLITE_SCHEMA_VERSION) {
@@ -209,7 +228,7 @@ bool initInference() {
         model, resolver, tensor_arena, TENSOR_ARENA_SIZE);
 
     if (interpreter->AllocateTensors() != kTfLiteOk) {
-        Serial.println("[INFERENCE] FATAL: AllocateTensors failed");
+        Serial.println("[INFERENCE] FATAL: AllocateTensors failed (increase TENSOR_ARENA_BYTES or use smaller model)");
         delete interpreter;
         interpreter = nullptr;
         return false;
@@ -358,7 +377,9 @@ int runInference() {
         }
     }
 
-    Serial.printf("[CNN] class=%d conf=%.2f\n", maxIdx, maxVal);
+    if constexpr (CNN_LOG_INFERENCE_EVERY_FRAME) {
+        Serial.printf("[CNN] class=%d conf=%.2f\n", maxIdx, maxVal);
+    }
 
     lastClass = maxIdx;
     lastConfidence = maxVal;

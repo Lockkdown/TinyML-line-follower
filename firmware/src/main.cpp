@@ -3,7 +3,6 @@
 #include "camera.h"
 #include "wifi_config.h"
 #include "wifi_controller.h"
-#include "inference.h"
 #include "robot_mode.h"
 
 static void runMotorTest() {
@@ -30,9 +29,6 @@ void setup() {
     initMotor();
     if (initCamera()) {
         setCameraModeStream();
-    }
-    if (!initInference()) {
-        Serial.println("[MAIN] Inference init failed — CNN mode unavailable");
     }
 }
 

@@ -23,6 +23,7 @@ static AsyncWebServer server(80);
 uint8_t g_speed = 180;
 static volatile bool g_cnnTransitionScheduled = false;
 static volatile bool g_wifiReconnectTaskStarted = false;
+static bool g_web_routes_registered = false;
 
 static bool parseFrameSize(const String& resolution, framesize_t* outFrameSize) {
     if (resolution == "QQVGA") {
@@ -302,12 +303,7 @@ static void registerRoutes() {
 
     server.on("/cnn/stats", HTTP_GET, [](AsyncWebServerRequest* request) {
         String json = "{";
-        json += "\"fps\":"        + String(g_cnn_stats.fps, 1)                  + ",";
-        json += "\"cam_ms\":"     + String(g_cnn_stats.cam_us  / 1000U)         + ",";
-        json += "\"prep_ms\":"    + String(g_cnn_stats.prep_us / 1000U)         + ",";
-        json += "\"inf_ms\":"     + String(g_cnn_stats.inf_us  / 1000U)         + ",";
-        json += "\"total_ms\":"   + String(g_cnn_stats.total_us / 1000U)        + ",";
-        json += "\"last_class\":" + String(g_cnn_stats.last_class)              + ",";
+        json += "\"last_class\":" + String(g_cnn_stats.last_class) + ",";
         json += "\"last_conf\":"  + String(g_cnn_stats.last_conf, 2);
         json += "}";
         AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
@@ -352,9 +348,17 @@ void connectWiFi(const char* ssid, const char* password) {
 }
 
 void startWebServer() {
-    registerRoutes();
+    if (!g_web_routes_registered) {
+        registerRoutes();
+        g_web_routes_registered = true;
+    }
     server.begin();
     Serial.println("[WebServer] Started on port 80");
+}
+
+void stopWebServer() {
+    server.end();
+    Serial.println("[WebServer] Stopped");
 }
 
 void reconnectWiFiAfterCnn() {
@@ -362,4 +366,5 @@ void reconnectWiFiAfterCnn() {
     WiFi.setSleep(false);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.println("[WiFi] Reconnecting after CNN session...");
+    startWebServer();
 }

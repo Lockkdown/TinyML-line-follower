@@ -8,7 +8,8 @@ from dataclasses import dataclass
 VALID_MODEL_NAMES: tuple[str, ...] = (
     "lenet5",
     "dsep_cnn",
-    "resnet8",
+    "basic_cnn",
+    "shallow_cnn",
 )
 
 

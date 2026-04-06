@@ -103,7 +103,7 @@ def log_metrics(metrics: dict, model_name: str) -> None:
     print(f"\n=== {model_name} Metrics ===")
     print(f"Accuracy: {metrics['accuracy']:.6f}")
     print(f"Macro F1:  {metrics['macro_f1']:.6f}")
-    print("Per class — P / R / F1 (support = số mẫu đúng nhãn trong test):")
+    print("Per class - P / R / F1 (support = count per class in test):")
     for cls in ("forward", "left", "right", "nothing"):
         p = metrics["precision_per_class"].get(cls, 0.0)
         r = metrics["recall_per_class"].get(cls, 0.0)

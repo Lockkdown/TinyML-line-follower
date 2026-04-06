@@ -15,4 +15,5 @@ constexpr int SPEED_TURN = 150;
 
 void connectWiFi(const char* ssid, const char* password);
 void startWebServer();
+void stopWebServer();
 void reconnectWiFiAfterCnn();

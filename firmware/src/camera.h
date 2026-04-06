@@ -33,6 +33,7 @@ constexpr int XCLK_FREQ_HZ = 24000000;
 constexpr int STREAM_QUALITY_DEFAULT = 20;
 
 bool initCamera();
+bool initCameraForCnnMode();
 bool deinitCamera();
 bool captureFrame(camera_fb_t** frame_buffer);
 void setStreamQuality(int quality);

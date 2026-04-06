@@ -49,6 +49,17 @@ static camera_config_t buildCameraConfig() {
     return config;
 }
 
+static camera_config_t buildCnnCameraConfig() {
+    camera_config_t config = buildCameraConfig();
+    config.pixel_format = PIXFORMAT_GRAYSCALE;
+    config.frame_size   = FRAMESIZE_96X96;
+    // Double-buffer so DMA captures the next frame while CPU runs inference (fb_count=1 stalls ~1 frame).
+    config.fb_count     = 2;
+    // 2x 96x96 gray ~18 KiB; internal DRAM is faster than PSRAM for capture + prep.
+    config.fb_location  = CAMERA_FB_IN_DRAM;
+    return config;
+}
+
 static void flushTwoFrames() {
     for (int i = 0; i < 2; ++i) {
         camera_fb_t* fb = esp_camera_fb_get();
@@ -69,6 +80,7 @@ static bool initCameraWithConfig(const camera_config_t& config, const char* succ
         return false;
     }
 
+    int warmup_ok = 0;
     for (int i = 0; i < CAMERA_WARMUP_FRAMES; ++i) {
         camera_fb_t* frame_buffer = esp_camera_fb_get();
         if (frame_buffer == nullptr) {
@@ -76,6 +88,12 @@ static bool initCameraWithConfig(const camera_config_t& config, const char* succ
             continue;
         }
         esp_camera_fb_return(frame_buffer);
+        warmup_ok++;
+    }
+    if (warmup_ok == 0) {
+        Serial.println("[Camera] Init FAILED: no frames after warmup — sensor not ready");
+        esp_camera_deinit();
+        return false;
     }
 
     setStreamQuality(STREAM_QUALITY_DEFAULT);
@@ -98,6 +116,11 @@ static bool initCameraWithConfig(const camera_config_t& config, const char* succ
 bool initCamera() {
     camera_config_t config = buildCameraConfig();
     return initCameraWithConfig(config, "[Camera] Init SUCCESS — QVGA JPEG");
+}
+
+bool initCameraForCnnMode() {
+    camera_config_t config = buildCnnCameraConfig();
+    return initCameraWithConfig(config, "[Camera] CNN mode: 96x96 GRAYSCALE");
 }
 
 bool deinitCamera() {
@@ -130,13 +153,6 @@ void setStreamQuality(int quality) {
     if (sensor) {
         sensor->set_quality(sensor, quality);
     }
-}
-
-static camera_config_t buildCnnCameraConfig() {
-    camera_config_t config = buildCameraConfig();
-    config.pixel_format = PIXFORMAT_GRAYSCALE;
-    config.frame_size   = FRAMESIZE_96X96;
-    return config;
 }
 
 static bool reinitCameraWithConfig(const camera_config_t& config, const char* label) {

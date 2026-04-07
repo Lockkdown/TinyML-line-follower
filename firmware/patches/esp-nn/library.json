@@ -7,6 +7,13 @@
       "+<src/**/*.S>",
       "-<src/convolution/esp_nn_conv_esp32p4.c>"
     ],
-    "flags": ["-mlongcalls", "-O2", "-Wno-unused-function"]
+    "flags": [
+      "-mlongcalls",
+      "-O3",
+      "-Wno-unused-function",
+      "-DESP_NN",
+      "-DCONFIG_IDF_TARGET_ESP32S3=1",
+      "-UCONFIG_ESP_NN_ANSI_C"
+    ]
   }
 }

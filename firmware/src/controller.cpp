@@ -20,11 +20,15 @@ int getCnnBaseSpeed() {
     return g_cnn_base_speed;
 }
 
-// Maps confidence → inner wheel PWM (inverse: high conf = lower inner speed)
+// Maps confidence → inner wheel PWM (inverse: high conf = lower inner speed).
+// inner_hi/inner_lo scale with g_cnn_base_speed so inner < outer at any base speed.
 static int calcInnerSpeed(float conf) {
+    const int outer = g_cnn_base_speed;
+    const int inner_hi = (outer * INNER_MAX) / BASE_SPEED;
+    const int inner_lo = (outer * INNER_MIN) / BASE_SPEED;
     float t = (conf - CONF_MIN) / (CONF_MAX - CONF_MIN);
     t = constrain(t, 0.0f, 1.0f);
-    return (int)(INNER_MAX - t * (INNER_MAX - INNER_MIN));
+    return (int)(inner_hi - t * (inner_hi - inner_lo));
 }
 
 void classToAction(int cls, float conf) {
@@ -33,26 +37,32 @@ void classToAction(int cls, float conf) {
         setMotorTrim(CNN_LEFT_TRIM, CNN_RIGHT_TRIM);
         trimInitialized = true;
     }
-    
+
+    if (conf < CNN_CONFIDENCE_THRESHOLD && cls != 3) {
+        setMotor(CNN_SPEED_FORWARD, CNN_SPEED_FORWARD);
+        return;
+    }
+
     // Lưu lại hướng rẽ cuối cùng có line
     static int last_seen_line_class = 0;
     if (cls != 3) {
         last_seen_line_class = cls;
     }
 
+    const int outer = g_cnn_base_speed;
     int left_speed = 0;
     int right_speed = 0;
     switch (cls) {
         case 0: // forward
-            left_speed = BASE_SPEED;
-            right_speed = BASE_SPEED;
+            left_speed = outer;
+            right_speed = outer;
             break;
         case 1: // left
             left_speed = calcInnerSpeed(conf);
-            right_speed = BASE_SPEED;
+            right_speed = outer;
             break;
         case 2: // right
-            left_speed = BASE_SPEED;
+            left_speed = outer;
             right_speed = calcInnerSpeed(conf);
             break;
         case 3: // nothing -> RECOVERY

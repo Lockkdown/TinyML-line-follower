@@ -1,6 +1,7 @@
 #pragma once
 
-// Motor pin assignments — match wiring_diagram.md §3.4 and codebase-context.md §8 exactly
+// Motor pin assignments — match wiring_diagram.md §3.4 and codebase-context.md §8 exactly.
+// Hardware: VMOT for motors (not USB 5V alone), common GND with ESP32 and driver; ENA/ENB jumpers per module.
 constexpr int MOTOR_LEFT_IN1  = 1;
 constexpr int MOTOR_LEFT_IN2  = 2;
 constexpr int MOTOR_LEFT_ENA  = 14;

@@ -1,6 +1,6 @@
 // file: firmware/src/robot_mode.cpp
 // purpose: manage robot operating modes and CNN inference loop
-// dependencies: camera.h, controller.h, inference.h, motor.h, wifi_controller.h
+// dependencies: camera.h, cnn_recovery.h, controller.h, inference.h, motor.h, wifi_controller.h
 
 #include "robot_mode.h"
 
@@ -11,6 +11,7 @@
 #include <freertos/task.h>
 
 #include "camera.h"
+#include "cnn_recovery.h"
 #include "controller.h"
 #include "inference.h"
 #include "motor.h"
@@ -24,72 +25,72 @@ static void stopCnnLoop() {
     g_cnnLoopActive = false;
 }
 
-static void applyHysteresis(int cls, float conf, int* prev_class, int* hold_count) {
-    static int lost_line_counter = 0;
-    static int recovery_active_counter = 0;
-    static int grace_period_counter = 0;
-
-    // Handle Grace Period after finding a line
-    if (grace_period_counter > 0) {
-        grace_period_counter--;
-        if (cls == 3) {
-            // Ignore noise immediately after finding a line
-            cls = *prev_class;
-        }
+static void logHystHoldVerbose(int cls, int hold_count, int prev_snapshot) {
+    if constexpr (!HYST_VERBOSE_LOG) {
+        return;
     }
-
-    // Asymmetric Hysteresis Logic
-    if (cls == 3) {
-        // Potential line loss detected
-        lost_line_counter++;
-        if (lost_line_counter < RECOVERY_HOLD_FRAMES) {
-            // Not enough frames to confirm line loss. 
-            // Coasting: pretend we still see the last known good class.
-            cls = *prev_class;
-            Serial.printf("[HYST] Ignoring noise cls=3 (lost %d/%d), coasting as cls=%d\n", 
-                          lost_line_counter, RECOVERY_HOLD_FRAMES, cls);
-        } else {
-            // Confirmed line loss. Trigger recovery.
-            lost_line_counter = RECOVERY_HOLD_FRAMES; // Cap to prevent overflow
-            recovery_active_counter++;
-            
-            if (recovery_active_counter > RECOVERY_TIMEOUT_FRAMES) {
-                // We've been spinning/backing up too long. Give up and stop.
-                Serial.printf("[HYST] RECOVERY TIMEOUT (%d frames). Stopping motors.\n", recovery_active_counter);
-                setMotor(0, 0);
-                return; // Skip classToAction
-            }
-        }
-    } else {
-        // Line detected (0, 1, or 2). Reset counters.
-        if (recovery_active_counter > 0) {
-            // We just recovered! Start grace period.
-            grace_period_counter = RECOVERY_GRACE_FRAMES;
-            Serial.printf("[HYST] Line found! Starting grace period (%d frames).\n", RECOVERY_GRACE_FRAMES);
-        }
-        lost_line_counter = 0;
-        recovery_active_counter = 0;
+    const bool suppressingTurn = (cls == 1 || cls == 2) && (prev_snapshot == 0);
+    if (!suppressingTurn) {
+        return;
     }
+    Serial.printf(
+        "[HYST] HOLDING turn cls=%d (hold %d/%d) acting on prev=%d\n",
+        cls,
+        hold_count,
+        HOLD_FRAMES,
+        prev_snapshot);
+}
 
-    // Standard Hysteresis for normal steering (0, 1, 2) and confirmed recovery (3)
+static void applyTurnHysteresis(int cls, float conf, int* prev_class, int* hold_count) {
     if (cls == *prev_class) {
         *hold_count = 0;
         classToAction(cls, conf);
-    } else {
-        (*hold_count)++;
-        // Log when suppressing a turn command — critical for diagnosing 90° overshoot.
-        // forward=0, left=1, right=2; prev_class=0 means was going straight.
-        const bool suppressingTurn = (cls == 1 || cls == 2) && (*prev_class == 0);
-        if (suppressingTurn) {
-            Serial.printf("[HYST] HOLDING turn cls=%d (hold %d/%d) acting on prev=%d\n",
-                          cls, *hold_count, HOLD_FRAMES, *prev_class);
-        }
-        if (*hold_count >= HOLD_FRAMES) {
-            *prev_class = cls;
-            *hold_count = 0;
-        }
-        classToAction(*prev_class, conf);
+        return;
     }
+    (*hold_count)++;
+    logHystHoldVerbose(cls, *hold_count, *prev_class);
+    if (*hold_count >= HOLD_FRAMES) {
+        *prev_class = cls;
+        *hold_count = 0;
+    }
+    classToAction(*prev_class, conf);
+}
+
+static void tickGraceMask(int& cls, int* prev_class, int* grace_period_counter) {
+    if (*grace_period_counter <= 0) {
+        return;
+    }
+    (*grace_period_counter)--;
+    if (cls == 3) {
+        cls = *prev_class;
+    }
+}
+
+static bool runGraceAndRecovery(int& cls, float conf, int* prev_class, int* grace_period_counter) {
+    tickGraceMask(cls, prev_class, grace_period_counter);
+    if (cls != 3) {
+        const bool start_grace = cnn_recovery_should_grace_before_reset();
+        cnn_recovery_reset();
+        if (start_grace) {
+            *grace_period_counter = RECOVERY_GRACE_FRAMES;
+            if constexpr (HYST_VERBOSE_LOG) {
+                Serial.printf(
+                    "[HYST] Line found! Starting grace period (%d frames).\n",
+                    RECOVERY_GRACE_FRAMES);
+            }
+        }
+        return false;
+    }
+    const CnnRecoveryResult rr = cnn_recovery_process_class3(&cls, *prev_class, conf);
+    return rr == CnnRecoveryResult::HandledReturn;
+}
+
+static void applyHysteresis(int& cls, float conf, int* prev_class, int* hold_count) {
+    static int grace_period_counter = 0;
+    if (runGraceAndRecovery(cls, conf, prev_class, &grace_period_counter)) {
+        return;
+    }
+    applyTurnHysteresis(cls, conf, prev_class, hold_count);
 }
 
 static void cnnLoopTask(void* param) {
@@ -131,7 +132,7 @@ static void cnnLoopTask(void* param) {
                 loop_fps);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(0);
     }
 
     g_cnnTaskHandle = nullptr;
@@ -145,8 +146,9 @@ static bool startCnnLoop() {
     pinMode(CNN_INDICATOR_LED, OUTPUT);
     g_cnnLoopActive = true;
     constexpr int kCnnTaskPriority = 6;
+    // 8 KiB stack: loop is thin (runInference on main arena); frees internal heap after ~160 KiB tensor arena.
     const BaseType_t created = xTaskCreatePinnedToCore(
-        cnnLoopTask, "CNN Loop", 16384, nullptr, kCnnTaskPriority, &g_cnnTaskHandle, 1);
+        cnnLoopTask, "CNN Loop", 8192, nullptr, kCnnTaskPriority, &g_cnnTaskHandle, 1);
     if (created != pdPASS) {
         g_cnnLoopActive = false;
         g_cnnTaskHandle = nullptr;
@@ -188,21 +190,46 @@ void setRobotMode(RobotMode mode) {
     }
 
     if (mode == MODE_CNN) {
-        if (!initCamera()) {
-            Serial.println("[Mode] Failed to init camera for CNN mode");
-            return;
-        }
-        // Tắt WiFi trước khi đổi mode camera để /snapshot không giữ mutex tranh với setCameraModeCNN.
-        initMotor();
+        stopWebServer();
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
-        delay(150);
+        delay(400);
 
-        if (!setCameraModeCNN()) {
-            Serial.println("[Mode] Failed to set camera to CNN mode — restoring WiFi");
+        if (!deinitCamera()) {
+            Serial.println("[Mode] Failed to deinit camera before CNN — restoring WiFi");
             reconnectWiFiAfterCnn();
             return;
         }
+
+        // Let I2C/SCCB and sensor settle after deinit before re-init (avoids SCCB_Write Failed).
+        delay(500);
+
+        if (!initCameraForCnnMode()) {
+            Serial.println("[Mode] Failed to init camera for CNN mode — restoring WiFi");
+            reconnectWiFiAfterCnn();
+            if (!initCamera()) {
+                Serial.println("[Mode] Camera stream restore failed after CNN init error");
+            }
+            return;
+        }
+
+        // Re-init after camera LEDC/XCLK so ENA/ENB PWM stays attached (init before deinit can be overwritten).
+        initMotor();
+        setMotor(0, 0);
+
+        if (!initInference()) {
+            Serial.println("[Mode] Inference init failed — restoring WiFi");
+            deinitCamera();
+            reconnectWiFiAfterCnn();
+            if (!initCamera()) {
+                Serial.println("[Mode] Camera stream restore after inference error");
+            }
+            return;
+        }
+
+        initMotor();
+        setMotor(0, 0);
+
         if (!startCnnLoop()) {
             Serial.println("[Mode] CNN loop start failed — restoring WiFi");
             setCameraModeStream();

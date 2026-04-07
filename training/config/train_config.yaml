@@ -1,4 +1,4 @@
-model_name: all_models      # lenet5 | dsep_cnn | resnet8 — mô hình chọn deploy: dsep_cnn
+model_name: all       # lenet5 | dsep_cnn | basic_cnn | shallow_cnn | all
 img_size: 96
 num_classes: 4
 batch_size: 16
@@ -14,6 +14,6 @@ use_augmentation: true
 # PNG previews per class under dataset/processed/<class>/ (tools/preview_augmented_samples.py)
 preview_samples_per_class: 6
 dropout: 0.6
-l2_reg: 0.02
+l2_reg: 0.025
 # 0 = plain sparse CE; 0.05-0.2 thường dùng để giảm overconfidence (càng cao càng mềm nhãn)
 label_smoothing: 0.3

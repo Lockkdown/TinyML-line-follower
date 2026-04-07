@@ -26,7 +26,8 @@ OUTPUT_TFLITE = ROOT_DIR / "outputs" / "tflite"
 MODEL_NAMES = [
     "lenet5",
     "dsep_cnn",
-    "resnet8",
+    "basic_cnn",
+    "shallow_cnn",
 ]
 
 
@@ -74,7 +75,7 @@ def main():
         if saved_model_path.exists():
             export_tflite(model_name, str(saved_model_path), str(output_dir))
         else:
-            print(f"\n⚠️  SavedModel not found for {model_name}: {saved_model_path}")
+            print(f"\nWARNING: SavedModel not found for {model_name}: {saved_model_path}")
             print(f"   Run training first: python training/train.py")
     
     print(f"\n{'='*50}")

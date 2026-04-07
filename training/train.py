@@ -19,7 +19,8 @@ from training.data.dataset_loader import load_dataset
 from training.model.model_config import ModelConfig
 from training.model.lenet5_builder import build_lenet5
 from training.model.dsep_cnn_builder import build_dsep_cnn
-from training.model.resnet8_builder import build_resnet8
+from training.model.basic_cnn_builder import build_basic_cnn
+from training.model.shallow_cnn_builder import build_shallow_cnn
 from training.evaluate.metrics import (
     aggregated_metrics_path,
     comparison_report_path,
@@ -42,7 +43,8 @@ np.random.seed(42)
 MODEL_REGISTRY: dict[str, callable] = {
     "lenet5": build_lenet5,
     "dsep_cnn": build_dsep_cnn,
-    "resnet8": build_resnet8,
+    "basic_cnn": build_basic_cnn,
+    "shallow_cnn": build_shallow_cnn,
 }
 
 # Paths
